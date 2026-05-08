@@ -1,0 +1,37 @@
+---
+import SiteLayout from '../layouts/SiteLayout.astro';
+import { db, schema } from '../db/client.ts';
+import { eq, desc } from 'drizzle-orm';
+
+const posts = await db
+  .select({
+    slug: schema.posts.slug,
+    title: schema.posts.title,
+    excerpt: schema.posts.excerpt,
+    publishedAt: schema.posts.publishedAt,
+    authorName: schema.users.displayName,
+  })
+  .from(schema.posts)
+  .leftJoin(schema.users, eq(schema.users.id, schema.posts.authorId))
+  .where(eq(schema.posts.status, 'published'))
+  .orderBy(desc(schema.posts.publishedAt))
+  .all();
+---
+<SiteLayout>
+  {posts.length === 0 ? (
+    <p style="color:var(--muted)">No posts yet. <a href="/admin">Sign in to the admin</a> to publish the first one.</p>
+  ) : (
+    <ul class="post-list">
+      {posts.map((p) => (
+        <li>
+          <h2><a href={`/posts/${p.slug}`}>{p.title}</a></h2>
+          <div class="post-meta">
+            {p.publishedAt && <time datetime={p.publishedAt.toISOString()}>{p.publishedAt.toLocaleDateString()}</time>}
+            {p.authorName && <> · by {p.authorName}</>}
+          </div>
+          {p.excerpt && <p class="post-excerpt">{p.excerpt}</p>}
+        </li>
+      ))}
+    </ul>
+  )}
+</SiteLayout>

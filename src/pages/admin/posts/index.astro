@@ -1,0 +1,49 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import { db, schema } from '../../../db/client.ts';
+import { desc, eq } from 'drizzle-orm';
+
+const rows = await db
+  .select({
+    id: schema.posts.id,
+    slug: schema.posts.slug,
+    title: schema.posts.title,
+    status: schema.posts.status,
+    updatedAt: schema.posts.updatedAt,
+    authorName: schema.users.displayName,
+  })
+  .from(schema.posts)
+  .leftJoin(schema.users, eq(schema.users.id, schema.posts.authorId))
+  .orderBy(desc(schema.posts.updatedAt))
+  .all();
+---
+<AdminLayout title="Posts">
+  <div class="toolbar">
+    <h1 style="margin:0">Posts</h1>
+    <a class="btn" href="/admin/posts/new">+ New post</a>
+  </div>
+
+  {rows.length === 0 ? (
+    <div class="card">No posts yet.</div>
+  ) : (
+    <table>
+      <thead><tr><th>Title</th><th>Author</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+      <tbody>
+        {rows.map((p) => (
+          <tr>
+            <td><a href={`/admin/posts/${p.id}`}>{p.title}</a><div style="color:var(--muted);font-size:0.8rem">/{p.slug}</div></td>
+            <td>{p.authorName}</td>
+            <td><span class={`badge ${p.status}`}>{p.status}</span></td>
+            <td>{p.updatedAt.toLocaleString()}</td>
+            <td class="actions">
+              {p.status === 'published' && <a href={`/posts/${p.slug}`} target="_blank" class="btn secondary">View</a>}
+              <form method="POST" action={`/admin/posts/${p.id}/delete`} onsubmit="return confirm('Delete this post?')">
+                <button type="submit" class="btn danger">Delete</button>
+              </form>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )}
+</AdminLayout>

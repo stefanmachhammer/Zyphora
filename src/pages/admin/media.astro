@@ -1,0 +1,95 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { db, schema } from '../../db/client.ts';
+import { desc, eq } from 'drizzle-orm';
+import { saveUpload, deleteUpload, publicUrl } from '../../lib/media.ts';
+import { randomUUID } from 'node:crypto';
+
+let error: string | null = null;
+let success: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('_action') ?? 'upload');
+
+  if (action === 'delete') {
+    const id = String(form.get('id') ?? '');
+    const item = await db.select().from(schema.media).where(eq(schema.media.id, id)).get();
+    if (item) {
+      await deleteUpload(item.filename);
+      await db.delete(schema.media).where(eq(schema.media.id, id));
+      success = 'File deleted.';
+    }
+  } else {
+    const file = form.get('file');
+    if (!(file instanceof File) || file.size === 0) {
+      error = 'Please choose a file.';
+    } else {
+      try {
+        const saved = await saveUpload(file);
+        await db.insert(schema.media).values({
+          id: randomUUID(),
+          filename: saved.filename,
+          originalName: file.name,
+          mimeType: saved.mimeType,
+          sizeBytes: saved.sizeBytes,
+          uploadedBy: Astro.locals.user!.id,
+        });
+        success = 'Uploaded.';
+      } catch (e) {
+        error = e instanceof Error ? e.message : 'Upload failed.';
+      }
+    }
+  }
+}
+
+const items = await db.select().from(schema.media).orderBy(desc(schema.media.createdAt)).all();
+
+const formatSize = (b: number) => {
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+};
+---
+<AdminLayout title="Media">
+  <div class="toolbar">
+    <h1 style="margin:0">Media</h1>
+  </div>
+
+  {success && <div class="alert success">{success}</div>}
+  {error && <div class="alert error">{error}</div>}
+
+  <div class="card" style="margin-bottom:20px">
+    <form method="POST" enctype="multipart/form-data" style="display:flex;gap:12px;align-items:center">
+      <input class="input" type="file" name="file" required />
+      <button type="submit" class="btn">Upload</button>
+    </form>
+    <div style="color:var(--muted);font-size:0.8rem;margin-top:8px">Max 10 MB · images, video, PDF</div>
+  </div>
+
+  {items.length === 0 ? (
+    <div class="card">No media uploaded yet.</div>
+  ) : (
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">
+      {items.map((m) => (
+        <div class="card" style="padding:12px">
+          {m.mimeType.startsWith('image/') ? (
+            <img src={publicUrl(m.filename)} alt={m.originalName} style="width:100%;height:120px;object-fit:cover;border-radius:4px;margin-bottom:8px" />
+          ) : (
+            <div style="height:120px;display:grid;place-items:center;background:#f0f1f4;border-radius:4px;margin-bottom:8px;color:var(--muted);font-size:0.85rem">{m.mimeType}</div>
+          )}
+          <div style="font-size:0.85rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{m.originalName}</div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-bottom:8px">{formatSize(m.sizeBytes)}</div>
+          <div style="display:flex;gap:6px">
+            <a href={publicUrl(m.filename)} target="_blank" class="btn secondary" style="font-size:0.8rem;padding:4px 8px">Open</a>
+            <form method="POST" onsubmit="return confirm('Delete this file?')">
+              <input type="hidden" name="_action" value="delete" />
+              <input type="hidden" name="id" value={m.id} />
+              <button type="submit" class="btn danger" style="font-size:0.8rem;padding:4px 8px">Delete</button>
+            </form>
+          </div>
+        </div>
+      ))}
+    </div>
+  )}
+</AdminLayout>

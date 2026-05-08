@@ -1,0 +1,57 @@
+---
+import '../../styles/admin.css';
+import { db, schema } from '../../db/client.ts';
+import { eq } from 'drizzle-orm';
+import { verifyPassword, createSession, setSessionCookie } from '../../lib/auth.ts';
+
+if (Astro.locals.user) {
+  return Astro.redirect('/admin');
+}
+
+let error: string | null = null;
+const redirectTo = Astro.url.searchParams.get('redirect') ?? '/admin';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const email = String(form.get('email') ?? '').trim().toLowerCase();
+  const password = String(form.get('password') ?? '');
+
+  if (!email || !password) {
+    error = 'Email and password are required.';
+  } else {
+    const user = await db.select().from(schema.users).where(eq(schema.users.email, email)).get();
+    if (!user || !(await verifyPassword(user.passwordHash, password))) {
+      error = 'Invalid email or password.';
+    } else {
+      const session = await createSession(user.id);
+      setSessionCookie(Astro, session.id, session.expiresAt);
+      const safeRedirect = redirectTo.startsWith('/admin') ? redirectTo : '/admin';
+      return Astro.redirect(safeRedirect);
+    }
+  }
+}
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in · ZyphoraCMS</title>
+  </head>
+  <body class="login-page">
+    <form method="POST" class="login-card">
+      <h1>ZyphoraCMS</h1>
+      <p class="subtitle">Sign in to manage your site</p>
+      {error && <div class="alert error">{error}</div>}
+      <div class="field">
+        <label for="email">Email</label>
+        <input class="input" id="email" name="email" type="email" autocomplete="username" required autofocus />
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input class="input" id="password" name="password" type="password" autocomplete="current-password" required />
+      </div>
+      <button class="btn" type="submit" style="width:100%">Sign in</button>
+    </form>
+  </body>
+</html>

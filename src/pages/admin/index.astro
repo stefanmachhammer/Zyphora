@@ -1,0 +1,40 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { db, schema } from '../../db/client.ts';
+import { eq, desc } from 'drizzle-orm';
+
+const totalPosts = (await db.select().from(schema.posts).all()).length;
+const publishedPosts = (await db.select().from(schema.posts).where(eq(schema.posts.status, 'published')).all()).length;
+const totalUsers = (await db.select().from(schema.users).all()).length;
+const totalMedia = (await db.select().from(schema.media).all()).length;
+
+const recent = await db.select().from(schema.posts).orderBy(desc(schema.posts.updatedAt)).limit(5).all();
+---
+<AdminLayout title="Dashboard">
+  <h1>Welcome back, {Astro.locals.user?.displayName}</h1>
+
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px;">
+    <div class="card"><div style="color:var(--muted);font-size:0.8rem;text-transform:uppercase">Posts</div><div style="font-size:1.6rem;font-weight:700">{totalPosts}</div></div>
+    <div class="card"><div style="color:var(--muted);font-size:0.8rem;text-transform:uppercase">Published</div><div style="font-size:1.6rem;font-weight:700">{publishedPosts}</div></div>
+    <div class="card"><div style="color:var(--muted);font-size:0.8rem;text-transform:uppercase">Media</div><div style="font-size:1.6rem;font-weight:700">{totalMedia}</div></div>
+    <div class="card"><div style="color:var(--muted);font-size:0.8rem;text-transform:uppercase">Users</div><div style="font-size:1.6rem;font-weight:700">{totalUsers}</div></div>
+  </div>
+
+  <h2>Recent posts</h2>
+  {recent.length === 0 ? (
+    <div class="card">No posts yet. <a href="/admin/posts/new">Create the first one →</a></div>
+  ) : (
+    <table>
+      <thead><tr><th>Title</th><th>Status</th><th>Updated</th></tr></thead>
+      <tbody>
+        {recent.map((p) => (
+          <tr>
+            <td><a href={`/admin/posts/${p.id}`}>{p.title}</a></td>
+            <td><span class={`badge ${p.status}`}>{p.status}</span></td>
+            <td>{p.updatedAt.toLocaleString()}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )}
+</AdminLayout>

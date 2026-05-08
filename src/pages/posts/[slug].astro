@@ -1,0 +1,36 @@
+---
+import SiteLayout from '../../layouts/SiteLayout.astro';
+import { db, schema } from '../../db/client.ts';
+import { eq, and } from 'drizzle-orm';
+
+const { slug } = Astro.params;
+if (!slug) return new Response('Not found', { status: 404 });
+
+const row = await db
+  .select({
+    title: schema.posts.title,
+    excerpt: schema.posts.excerpt,
+    contentHtml: schema.posts.contentHtml,
+    publishedAt: schema.posts.publishedAt,
+    authorName: schema.users.displayName,
+  })
+  .from(schema.posts)
+  .leftJoin(schema.users, eq(schema.users.id, schema.posts.authorId))
+  .where(and(eq(schema.posts.slug, slug), eq(schema.posts.status, 'published')))
+  .get();
+
+if (!row) return new Response('Not found', { status: 404 });
+---
+<SiteLayout title={row.title} description={row.excerpt ?? undefined}>
+  <article class="post">
+    <header>
+      <h1>{row.title}</h1>
+      <div class="post-meta">
+        {row.publishedAt && <time datetime={row.publishedAt.toISOString()}>{row.publishedAt.toLocaleDateString()}</time>}
+        {row.authorName && <> · by {row.authorName}</>}
+      </div>
+    </header>
+    <div class="prose" set:html={row.contentHtml} />
+  </article>
+  <p style="margin-top:32px"><a href="/">← All posts</a></p>
+</SiteLayout>

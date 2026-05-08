@@ -1,0 +1,140 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { db, schema } from '../../db/client.ts';
+import { eq, desc } from 'drizzle-orm';
+import { hashPassword, canManageUsers, newUserId } from '../../lib/auth.ts';
+import { z } from 'zod';
+
+if (!canManageUsers(Astro.locals.user)) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+const userFormSchema = z.object({
+  email: z.email().trim().toLowerCase(),
+  displayName: z.string().trim().min(1).max(100),
+  password: z.string().min(8).max(200),
+  role: z.enum(['admin', 'editor', 'author']),
+});
+
+const updateRoleSchema = z.object({
+  id: z.string(),
+  role: z.enum(['admin', 'editor', 'author']),
+});
+
+let error: string | null = null;
+let success: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('_action') ?? 'create');
+
+  if (action === 'delete') {
+    const id = String(form.get('id') ?? '');
+    if (id === Astro.locals.user!.id) {
+      error = 'You cannot delete your own account.';
+    } else {
+      await db.delete(schema.users).where(eq(schema.users.id, id));
+      success = 'User deleted.';
+    }
+  } else if (action === 'update_role') {
+    const parsed = updateRoleSchema.safeParse({
+      id: form.get('id'),
+      role: form.get('role'),
+    });
+    if (!parsed.success) {
+      error = 'Invalid role.';
+    } else if (parsed.data.id === Astro.locals.user!.id && parsed.data.role !== 'admin') {
+      error = 'You cannot demote yourself.';
+    } else {
+      await db.update(schema.users).set({ role: parsed.data.role }).where(eq(schema.users.id, parsed.data.id));
+      success = 'Role updated.';
+    }
+  } else {
+    const parsed = userFormSchema.safeParse({
+      email: form.get('email'),
+      displayName: form.get('displayName'),
+      password: form.get('password'),
+      role: form.get('role'),
+    });
+    if (!parsed.success) {
+      error = parsed.error.issues[0]?.message ?? 'Invalid input.';
+    } else {
+      const existing = await db.select().from(schema.users).where(eq(schema.users.email, parsed.data.email)).get();
+      if (existing) {
+        error = 'A user with that email already exists.';
+      } else {
+        await db.insert(schema.users).values({
+          id: newUserId(),
+          email: parsed.data.email,
+          passwordHash: await hashPassword(parsed.data.password),
+          displayName: parsed.data.displayName,
+          role: parsed.data.role,
+        });
+        success = 'User created.';
+      }
+    }
+  }
+}
+
+const users = await db.select().from(schema.users).orderBy(desc(schema.users.createdAt)).all();
+---
+<AdminLayout title="Users">
+  <div class="toolbar">
+    <h1 style="margin:0">Users</h1>
+  </div>
+
+  {success && <div class="alert success">{success}</div>}
+  {error && <div class="alert error">{error}</div>}
+
+  <div class="card" style="margin-bottom:20px">
+    <h2 style="margin-top:0">Add user</h2>
+    <form method="POST" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="field"><label>Email</label><input class="input" type="email" name="email" required /></div>
+      <div class="field"><label>Display name</label><input class="input" name="displayName" required /></div>
+      <div class="field"><label>Password (min 8 chars)</label><input class="input" type="password" name="password" minlength="8" required /></div>
+      <div class="field">
+        <label>Role</label>
+        <select class="select" name="role">
+          <option value="author">Author</option>
+          <option value="editor">Editor</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div style="grid-column:1 / -1"><button type="submit" class="btn">Create user</button></div>
+    </form>
+  </div>
+
+  <table>
+    <thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Created</th><th></th></tr></thead>
+    <tbody>
+      {users.map((u) => (
+        <tr>
+          <td>{u.email}</td>
+          <td>{u.displayName}</td>
+          <td>
+            <form method="POST" style="display:flex;gap:6px;align-items:center">
+              <input type="hidden" name="_action" value="update_role" />
+              <input type="hidden" name="id" value={u.id} />
+              <select class="select" name="role" style="width:auto;font-size:0.85rem;padding:4px 6px">
+                <option value="author" selected={u.role === 'author'}>author</option>
+                <option value="editor" selected={u.role === 'editor'}>editor</option>
+                <option value="admin" selected={u.role === 'admin'}>admin</option>
+              </select>
+              <button type="submit" class="btn secondary" style="font-size:0.8rem;padding:4px 8px">Save</button>
+            </form>
+          </td>
+          <td>{u.createdAt.toLocaleDateString()}</td>
+          <td>
+            {u.id !== Astro.locals.user!.id && (
+              <form method="POST" onsubmit="return confirm('Delete this user?')">
+                <input type="hidden" name="_action" value="delete" />
+                <input type="hidden" name="id" value={u.id} />
+                <button type="submit" class="btn danger" style="font-size:0.8rem;padding:4px 8px">Delete</button>
+              </form>
+            )}
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</AdminLayout>

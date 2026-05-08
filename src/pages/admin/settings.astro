@@ -1,0 +1,82 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { getSetting, setSetting } from '../../lib/settings.ts';
+import { hashPassword, verifyPassword } from '../../lib/auth.ts';
+import { db, schema } from '../../db/client.ts';
+import { eq } from 'drizzle-orm';
+
+let success: string | null = null;
+let error: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('_action') ?? 'site');
+
+  if (action === 'site') {
+    await setSetting('site_title', String(form.get('site_title') ?? '').trim() || 'ZyphoraCMS');
+    await setSetting('site_description', String(form.get('site_description') ?? '').trim());
+    success = 'Site settings saved.';
+  } else if (action === 'password') {
+    const current = String(form.get('current') ?? '');
+    const next = String(form.get('next') ?? '');
+    const confirm = String(form.get('confirm') ?? '');
+    const me = Astro.locals.user!;
+
+    if (next.length < 8) {
+      error = 'New password must be at least 8 characters.';
+    } else if (next !== confirm) {
+      error = 'Password confirmation does not match.';
+    } else if (!(await verifyPassword(me.passwordHash, current))) {
+      error = 'Current password is incorrect.';
+    } else {
+      await db.update(schema.users).set({ passwordHash: await hashPassword(next) }).where(eq(schema.users.id, me.id));
+      success = 'Password changed.';
+    }
+  }
+}
+
+const siteTitle = await getSetting('site_title', 'ZyphoraCMS');
+const siteDescription = await getSetting('site_description', '');
+---
+<AdminLayout title="Settings">
+  <h1>Settings</h1>
+
+  {success && <div class="alert success">{success}</div>}
+  {error && <div class="alert error">{error}</div>}
+
+  <div class="card" style="margin-bottom:20px">
+    <h2 style="margin-top:0">Site</h2>
+    <form method="POST">
+      <input type="hidden" name="_action" value="site" />
+      <div class="field">
+        <label>Site title</label>
+        <input class="input" name="site_title" value={siteTitle} />
+      </div>
+      <div class="field">
+        <label>Site description</label>
+        <textarea class="textarea" name="site_description" rows="2">{siteDescription}</textarea>
+      </div>
+      <button class="btn" type="submit">Save</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Change your password</h2>
+    <form method="POST">
+      <input type="hidden" name="_action" value="password" />
+      <div class="field">
+        <label>Current password</label>
+        <input class="input" type="password" name="current" required autocomplete="current-password" />
+      </div>
+      <div class="field">
+        <label>New password</label>
+        <input class="input" type="password" name="next" minlength="8" required autocomplete="new-password" />
+      </div>
+      <div class="field">
+        <label>Confirm new password</label>
+        <input class="input" type="password" name="confirm" minlength="8" required autocomplete="new-password" />
+      </div>
+      <button class="btn" type="submit">Update password</button>
+    </form>
+  </div>
+</AdminLayout>

@@ -1,0 +1,39 @@
+---
+import '../styles/theme.css';
+import { getSetting } from '../lib/settings.ts';
+
+const { title, description } = Astro.props as { title?: string; description?: string };
+const siteTitle = await getSetting('site_title', 'ZyphoraCMS');
+const siteDescription = await getSetting('site_description', '');
+const pageTitle = title ? `${title} · ${siteTitle}` : siteTitle;
+const metaDescription = description ?? siteDescription;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{pageTitle}</title>
+    {metaDescription && <meta name="description" content={metaDescription} />}
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container">
+        <div>
+          <a href="/" class="site-title">{siteTitle}</a>
+          {siteDescription && <div class="site-tagline">{siteDescription}</div>}
+        </div>
+        <nav class="site-nav">
+          <a href="/">Home</a>
+          <a href="/admin">Admin</a>
+        </nav>
+      </div>
+    </header>
+    <main class="container">
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <div class="container">© {new Date().getFullYear()} {siteTitle} · powered by ZyphoraCMS</div>
+    </footer>
+  </body>
+</html>

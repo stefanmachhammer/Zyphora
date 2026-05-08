@@ -1,0 +1,72 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import TiptapEditor from '../../../components/TiptapEditor.tsx';
+import { postFormSchema, createPost } from '../../../lib/posts.ts';
+
+let error: string | null = null;
+let values: { title: string; slug: string; excerpt: string; contentHtml: string; status: 'draft' | 'published' } = {
+  title: '', slug: '', excerpt: '', contentHtml: '', status: 'draft',
+};
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const parsed = postFormSchema.safeParse({
+    title: form.get('title') ?? '',
+    slug: form.get('slug') ?? '',
+    excerpt: form.get('excerpt') ?? '',
+    contentHtml: form.get('contentHtml') ?? '',
+    status: form.get('status') ?? 'draft',
+  });
+
+  if (!parsed.success) {
+    error = parsed.error.issues[0]?.message ?? 'Invalid input';
+    values = {
+      title: String(form.get('title') ?? ''),
+      slug: String(form.get('slug') ?? ''),
+      excerpt: String(form.get('excerpt') ?? ''),
+      contentHtml: String(form.get('contentHtml') ?? ''),
+      status: form.get('status') === 'published' ? 'published' : 'draft',
+    };
+  } else {
+    const newId = await createPost(parsed.data, Astro.locals.user!.id);
+    return Astro.redirect(`/admin/posts/${newId}?created=1`);
+  }
+}
+---
+<AdminLayout title="New post">
+  <div class="toolbar">
+    <h1 style="margin:0">New post</h1>
+    <a href="/admin/posts" class="btn secondary">← Back</a>
+  </div>
+
+  {error && <div class="alert error">{error}</div>}
+
+  <form method="POST">
+    <div class="card" style="margin-bottom:16px">
+      <div class="field">
+        <label for="title">Title</label>
+        <input class="input" id="title" name="title" required value={values.title} />
+      </div>
+      <div class="field">
+        <label for="slug">Slug (optional — auto-generated)</label>
+        <input class="input" id="slug" name="slug" value={values.slug} placeholder="my-first-post" />
+      </div>
+      <div class="field">
+        <label for="excerpt">Excerpt</label>
+        <textarea class="textarea" id="excerpt" name="excerpt" rows="2">{values.excerpt}</textarea>
+      </div>
+      <div class="field">
+        <label>Content</label>
+        <TiptapEditor name="contentHtml" initialHtml={values.contentHtml} client:only="react" />
+      </div>
+      <div class="field">
+        <label for="status">Status</label>
+        <select class="select" id="status" name="status">
+          <option value="draft" selected={values.status === 'draft'}>Draft</option>
+          <option value="published" selected={values.status === 'published'}>Published</option>
+        </select>
+      </div>
+    </div>
+    <button type="submit" class="btn">Create post</button>
+  </form>
+</AdminLayout>

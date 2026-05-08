@@ -1,0 +1,98 @@
+---
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import TiptapEditor from '../../../components/TiptapEditor.tsx';
+import { db, schema } from '../../../db/client.ts';
+import { eq } from 'drizzle-orm';
+import { postFormSchema, updatePost } from '../../../lib/posts.ts';
+import { canEditPost } from '../../../lib/auth.ts';
+
+const { id } = Astro.params;
+if (!id) return Astro.redirect('/admin/posts');
+
+const post = await db.select().from(schema.posts).where(eq(schema.posts.id, id)).get();
+if (!post) return Astro.redirect('/admin/posts');
+
+if (!canEditPost(Astro.locals.user, post)) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+let error: string | null = null;
+let success: string | null = null;
+let values = {
+  title: post.title,
+  slug: post.slug,
+  excerpt: post.excerpt ?? '',
+  contentHtml: post.contentHtml,
+  status: post.status,
+};
+
+if (Astro.url.searchParams.get('created') === '1') success = 'Post created.';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const parsed = postFormSchema.safeParse({
+    title: form.get('title') ?? '',
+    slug: form.get('slug') ?? '',
+    excerpt: form.get('excerpt') ?? '',
+    contentHtml: form.get('contentHtml') ?? '',
+    status: form.get('status') ?? 'draft',
+  });
+
+  if (!parsed.success) {
+    error = parsed.error.issues[0]?.message ?? 'Invalid input';
+    values = {
+      title: String(form.get('title') ?? ''),
+      slug: String(form.get('slug') ?? ''),
+      excerpt: String(form.get('excerpt') ?? ''),
+      contentHtml: String(form.get('contentHtml') ?? ''),
+      status: (form.get('status') === 'published' ? 'published' : 'draft'),
+    };
+  } else {
+    await updatePost(id, parsed.data, post.status, post.publishedAt);
+    return Astro.redirect(`/admin/posts/${id}?saved=1`);
+  }
+}
+
+if (Astro.url.searchParams.get('saved') === '1') success = 'Post saved.';
+---
+<AdminLayout title={`Edit · ${post.title}`}>
+  <div class="toolbar">
+    <h1 style="margin:0">Edit post</h1>
+    <div class="actions">
+      {post.status === 'published' && <a href={`/posts/${post.slug}`} target="_blank" class="btn secondary">View live</a>}
+      <a href="/admin/posts" class="btn secondary">← Back</a>
+    </div>
+  </div>
+
+  {success && <div class="alert success">{success}</div>}
+  {error && <div class="alert error">{error}</div>}
+
+  <form method="POST">
+    <div class="card" style="margin-bottom:16px">
+      <div class="field">
+        <label for="title">Title</label>
+        <input class="input" id="title" name="title" required value={values.title} />
+      </div>
+      <div class="field">
+        <label for="slug">Slug</label>
+        <input class="input" id="slug" name="slug" value={values.slug} />
+      </div>
+      <div class="field">
+        <label for="excerpt">Excerpt</label>
+        <textarea class="textarea" id="excerpt" name="excerpt" rows="2">{values.excerpt}</textarea>
+      </div>
+      <div class="field">
+        <label>Content</label>
+        <TiptapEditor name="contentHtml" initialHtml={values.contentHtml} client:only="react" />
+      </div>
+      <div class="field">
+        <label for="status">Status</label>
+        <select class="select" id="status" name="status">
+          <option value="draft" selected={values.status === 'draft'}>Draft</option>
+          <option value="published" selected={values.status === 'published'}>Published</option>
+        </select>
+      </div>
+    </div>
+    <button type="submit" class="btn">Save changes</button>
+  </form>
+</AdminLayout>
