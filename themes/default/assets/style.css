@@ -2,14 +2,36 @@
   --bg: #fafaf9;
   --surface: #ffffff;
   --text: #1d2128;
+  --text-soft: #3a3f4b;
   --muted: #6b7180;
   --border: #e3e5ea;
   --accent: #2a64f6;
   --accent-hover: #1d4fd1;
+  --code-bg: #f0f1f4;
+  --code-text: #1d2128;
   --max-width: 960px;
   --radius: 8px;
   --shadow: 0 1px 2px rgba(20, 24, 32, 0.04), 0 4px 16px rgba(20, 24, 32, 0.04);
 }
+
+/* Dark palette: only token overrides — components stay token-driven so a single
+   selector themes the whole site. Picked for WCAG AA against --bg / --surface. */
+[data-theme="dark"] {
+  --bg: #0f1115;
+  --surface: #171a21;
+  --text: #ecedf1;
+  --text-soft: #c5c8d1;
+  --muted: #9aa1ad;
+  --border: #2a2f3a;
+  --accent: #5b8cff;
+  --accent-hover: #82a6ff;
+  --code-bg: #1d2128;
+  --code-text: #f0f1f4;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+html { color-scheme: light; }
+[data-theme="dark"] { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 
@@ -69,7 +91,12 @@ a:hover { color: var(--accent-hover); }
 }
 .site-title:hover { color: var(--accent); }
 
-.nav-toggle { margin-left: auto; }
+.header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
 .navbar {
   display: flex;
@@ -122,6 +149,58 @@ a:hover { color: var(--accent-hover); }
 .nav-toggle[aria-expanded="true"] .nav-toggle-bar:nth-child(3) {
   transform: translateY(-6px) rotate(-45deg);
 }
+
+/* Sun/moon slider switch. Knob position is driven by [data-theme] so the
+   inline head script gets the correct rest position before paint. */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  border-radius: 999px;
+}
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.theme-toggle-track {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 56px;
+  height: 28px;
+  padding: 0 7px;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.theme-toggle:hover .theme-toggle-track { border-color: var(--accent); }
+
+.theme-toggle-icon {
+  position: relative;
+  z-index: 1;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+  transition: color 0.2s ease;
+}
+[data-theme="light"] .theme-toggle-icon-sun { color: var(--accent); }
+[data-theme="dark"] .theme-toggle-icon-moon { color: var(--accent); }
+
+.theme-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  background: var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.22s ease;
+}
+[data-theme="dark"] .theme-toggle-knob { transform: translateX(28px); }
 
 @media (max-width: 719px) {
   .nav-toggle { display: inline-flex; }
@@ -208,7 +287,7 @@ main.container { padding-top: 40px; padding-bottom: 60px; }
 .post-card-title a { color: var(--text); text-decoration: none; }
 .post-card-title a:hover { color: var(--accent); }
 .post-meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 10px; }
-.post-excerpt { color: #3a3f4b; margin: 0 0 12px; }
+.post-excerpt { color: var(--text-soft); margin: 0 0 12px; }
 .post-card-more { margin: 0; font-size: 0.9rem; }
 .post-card-more a { text-decoration: none; font-weight: 500; }
 .post-card-more a:hover { text-decoration: underline; }
@@ -229,14 +308,15 @@ article.post .post-meta { font-size: 0.9rem; }
 .prose a { color: var(--accent); }
 .prose img { max-width: 100%; border-radius: var(--radius); }
 .prose pre {
-  background: #1d2128;
-  color: #f0f1f4;
+  background: var(--code-bg);
+  color: var(--code-text);
   padding: 14px 16px;
   border-radius: var(--radius);
   overflow-x: auto;
   font-size: 0.9rem;
 }
-.prose code { background: #f0f1f4; padding: 1px 5px; border-radius: 3px; font-size: 0.9em; }
+[data-theme="dark"] .prose pre { border: 1px solid var(--border); }
+.prose code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; border-radius: 3px; font-size: 0.9em; }
 .prose pre code { background: transparent; padding: 0; }
 .prose blockquote {
   border-left: 3px solid var(--accent);

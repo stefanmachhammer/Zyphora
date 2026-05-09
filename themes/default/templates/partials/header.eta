@@ -3,18 +3,6 @@
       <div class="site-header-inner container">
         <a href="<%= url.home %>" class="site-title"><%= site.title %></a>
 
-        <button
-          class="nav-toggle"
-          type="button"
-          aria-controls="primary-nav"
-          aria-expanded="false"
-          aria-label="Toggle navigation"
-        >
-          <span class="nav-toggle-bar"></span>
-          <span class="nav-toggle-bar"></span>
-          <span class="nav-toggle-bar"></span>
-        </button>
-
         <nav id="primary-nav" class="site-nav" aria-label="Primary">
           <ul class="navbar">
             <li><a href="<%= url.home %>">Home</a></li>
@@ -24,5 +12,48 @@
             <li><a href="<%= url.admin %>">Admin</a></li>
           </ul>
         </nav>
+
+        <div class="header-actions">
+          <button
+            class="theme-toggle"
+            type="button"
+            role="switch"
+            aria-checked="false"
+            aria-label="Toggle dark mode"
+            title="Toggle dark mode"
+          >
+            <span class="theme-toggle-track">
+              <svg class="theme-toggle-icon theme-toggle-icon-sun" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/>
+                <g stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <line x1="12" y1="2" x2="12" y2="5"/>
+                  <line x1="12" y1="19" x2="12" y2="22"/>
+                  <line x1="2" y1="12" x2="5" y2="12"/>
+                  <line x1="19" y1="12" x2="22" y2="12"/>
+                  <line x1="4.5" y1="4.5" x2="6.6" y2="6.6"/>
+                  <line x1="17.4" y1="17.4" x2="19.5" y2="19.5"/>
+                  <line x1="4.5" y1="19.5" x2="6.6" y2="17.4"/>
+                  <line x1="17.4" y1="6.6" x2="19.5" y2="4.5"/>
+                </g>
+              </svg>
+              <svg class="theme-toggle-icon theme-toggle-icon-moon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+              </svg>
+              <span class="theme-toggle-knob"></span>
+            </span>
+          </button>
+
+          <button
+            class="nav-toggle"
+            type="button"
+            aria-controls="primary-nav"
+            aria-expanded="false"
+            aria-label="Toggle navigation"
+          >
+            <span class="nav-toggle-bar"></span>
+            <span class="nav-toggle-bar"></span>
+            <span class="nav-toggle-bar"></span>
+          </button>
+        </div>
       </div>
     </header>

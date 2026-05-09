@@ -9,6 +9,21 @@ const metaDescription = it.metaDescription ?? site.description;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title><%= pageTitle %></title>
     <% if (metaDescription) { %><meta name="description" content="<%= metaDescription %>" /><% } %>
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('zyphora-theme');
+          var mode = (stored === 'light' || stored === 'dark' || stored === 'system') ? stored : 'system';
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var resolved = mode === 'system' ? (prefersDark ? 'dark' : 'light') : mode;
+          document.documentElement.setAttribute('data-theme', resolved);
+          document.documentElement.setAttribute('data-theme-mode', mode);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'light');
+          document.documentElement.setAttribute('data-theme-mode', 'system');
+        }
+      })();
+    </script>
     <link rel="stylesheet" href="<%= theme.assetUrl('style.css') %>" />
     <script src="<%= theme.assetUrl('app.js') %>" defer></script>
   </head>
