@@ -157,7 +157,3 @@ Smaller items still on the list:
 - RSS / Atom feed
 - Image resizing and responsive `srcset`
 - Pluggable storage adapter (S3, R2) for media
-
-## License
-
-MIT
