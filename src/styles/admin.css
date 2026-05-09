@@ -259,3 +259,89 @@ tr:hover td { background: #fafbfc; }
 .tiptap pre { background: #1d2128; color: #f0f1f4; padding: 12px; border-radius: 4px; overflow-x: auto; }
 .tiptap code { background: #f0f1f4; padding: 1px 5px; border-radius: 3px; font-size: 0.9em; }
 .tiptap blockquote { border-left: 3px solid var(--border); margin-left: 0; padding-left: 14px; color: var(--muted); }
+
+/* ── Comments moderation ─────────────────────────────────────── */
+/* Sidebar: pending-count badge anchored to the speech-bubble icon. The
+   icon is wrapped in a positioning shell so the badge survives both full
+   and rail sidebar modes (the label collapses but the icon stays put). */
+.nav-icon-wrap { position: relative; display: inline-flex; flex: none; }
+.nav-badge {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-shadow: 0 0 0 2px #1d2128;
+}
+
+/* Status filter tabs across the top of the moderation page. */
+.comment-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.comment-tab {
+  padding: 8px 14px;
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.comment-tab:hover { color: var(--text); }
+.comment-tab.is-active { color: var(--text); border-bottom-color: var(--accent); }
+.comment-tab-count {
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
+  line-height: 1.4;
+}
+.comment-tab:not(.is-active) .comment-tab-count {
+  background: #e6e8ee;
+  color: var(--muted);
+}
+
+/* Table layout. The content column gets the flex space; date stays narrow
+   and right-aligned so it doesn't push the snippet around. */
+.comment-col-content { width: 40%; }
+.comment-col-date { white-space: nowrap; color: var(--muted); font-size: 0.85rem; }
+.comment-snippet {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.comment-author-name { font-weight: 600; }
+.comment-author-meta { color: var(--muted); font-size: 0.78rem; margin-top: 2px; }
+
+.comment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.comment-actions form { display: inline-flex; }

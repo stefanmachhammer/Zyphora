@@ -1,0 +1,169 @@
+---
+/**
+ * Comments moderation queue. Tabs across the top filter by status; the
+ * default view is "Pending" because that's where moderator attention is
+ * actually required.
+ *
+ * Authorization: admin or editor only — `author` is rejected with a 403.
+ * Authors are blocked because the queue exposes every commenter's email
+ * and IP across every post in the system, which is broader visibility
+ * than an author has reason to see.
+ *
+ * Actions are per-row form POSTs (Approve / Mark spam / Move to trash /
+ * Delete). Delete is hard-delete and only shown from the trash tab so a
+ * misclick on the main queue can never destroy data unrecoverably.
+ */
+import AdminLayout from '../../../layouts/AdminLayout.astro';
+import { canModerateComments } from '../../../lib/auth.ts';
+import {
+  getCommentsByStatus,
+  getCommentCounts,
+  setCommentStatus,
+  deleteComment,
+} from '../../../lib/comments.ts';
+
+if (!canModerateComments(Astro.locals.user)) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+let actionMessage: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('_action') ?? '');
+  const id = String(form.get('id') ?? '');
+  if (id) {
+    if (action === 'approve') {
+      await setCommentStatus(id, 'approved');
+      actionMessage = 'Comment approved.';
+    } else if (action === 'spam') {
+      await setCommentStatus(id, 'spam');
+      actionMessage = 'Marked as spam.';
+    } else if (action === 'trash') {
+      await setCommentStatus(id, 'trash');
+      actionMessage = 'Moved to trash.';
+    } else if (action === 'unspam') {
+      await setCommentStatus(id, 'pending');
+      actionMessage = 'Restored to pending.';
+    } else if (action === 'delete') {
+      await deleteComment(id);
+      actionMessage = 'Comment deleted.';
+    }
+  }
+}
+
+// Tab selection. Default to pending — the queue exists for the unmoderated
+// stuff, so opening straight on it saves a click.
+const validStatuses = ['pending', 'approved', 'spam', 'trash', 'all'] as const;
+type StatusTab = (typeof validStatuses)[number];
+const rawStatus = Astro.url.searchParams.get('status') ?? 'pending';
+const currentTab: StatusTab = (validStatuses as readonly string[]).includes(rawStatus)
+  ? (rawStatus as StatusTab)
+  : 'pending';
+
+const rows = await getCommentsByStatus(currentTab === 'all' ? undefined : currentTab);
+const counts = await getCommentCounts();
+
+const tabHref = (s: StatusTab) => `/admin/comments?status=${s}`;
+const snippet = (text: string, max = 140) =>
+  text.length <= max ? text : text.slice(0, max).trimEnd() + '…';
+---
+<AdminLayout title="Comments">
+  <div class="toolbar">
+    <h1 style="margin:0">Comments</h1>
+  </div>
+
+  {actionMessage && <div class="alert success">{actionMessage}</div>}
+
+  <div class="comment-tabs" role="tablist">
+    <a class={`comment-tab ${currentTab === 'pending' ? 'is-active' : ''}`} href={tabHref('pending')}>
+      Pending {counts.pending > 0 && <span class="comment-tab-count">{counts.pending}</span>}
+    </a>
+    <a class={`comment-tab ${currentTab === 'approved' ? 'is-active' : ''}`} href={tabHref('approved')}>
+      Approved {counts.approved > 0 && <span class="comment-tab-count">{counts.approved}</span>}
+    </a>
+    <a class={`comment-tab ${currentTab === 'spam' ? 'is-active' : ''}`} href={tabHref('spam')}>
+      Spam {counts.spam > 0 && <span class="comment-tab-count">{counts.spam}</span>}
+    </a>
+    <a class={`comment-tab ${currentTab === 'trash' ? 'is-active' : ''}`} href={tabHref('trash')}>
+      Trash {counts.trash > 0 && <span class="comment-tab-count">{counts.trash}</span>}
+    </a>
+    <a class={`comment-tab ${currentTab === 'all' ? 'is-active' : ''}`} href={tabHref('all')}>All</a>
+  </div>
+
+  {rows.length === 0 ? (
+    <div class="card">No comments in <strong>{currentTab}</strong>.</div>
+  ) : (
+    <table>
+      <thead>
+        <tr>
+          <th>Post</th>
+          <th>Author</th>
+          <th class="comment-col-content">Comment</th>
+          <th>Date</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((c) => (
+          <tr>
+            <td>
+              {c.postTitle ? (
+                <a href={`/admin/posts/${c.postId}`}>{c.postTitle}</a>
+              ) : (
+                <span style="color:var(--muted)">(deleted post)</span>
+              )}
+            </td>
+            <td>
+              <div class="comment-author-name">{c.authorName}</div>
+              <div class="comment-author-meta">
+                {c.authorEmail}
+                {c.ipAddress && <span> · {c.ipAddress}</span>}
+              </div>
+            </td>
+            <td class="comment-col-content">
+              <div class="comment-snippet">{snippet(c.content)}</div>
+            </td>
+            <td class="comment-col-date">{c.createdAt.toLocaleString()}</td>
+            <td class="actions comment-actions">
+              {c.status !== 'approved' && (
+                <form method="POST">
+                  <input type="hidden" name="_action" value="approve" />
+                  <input type="hidden" name="id" value={c.id} />
+                  <button type="submit" class="btn" style="font-size:0.8rem;padding:4px 8px">Approve</button>
+                </form>
+              )}
+              {c.status === 'spam' ? (
+                <form method="POST">
+                  <input type="hidden" name="_action" value="unspam" />
+                  <input type="hidden" name="id" value={c.id} />
+                  <button type="submit" class="btn secondary" style="font-size:0.8rem;padding:4px 8px">Not spam</button>
+                </form>
+              ) : c.status !== 'trash' && (
+                <form method="POST">
+                  <input type="hidden" name="_action" value="spam" />
+                  <input type="hidden" name="id" value={c.id} />
+                  <button type="submit" class="btn secondary" style="font-size:0.8rem;padding:4px 8px">Spam</button>
+                </form>
+              )}
+              {c.status !== 'trash' && (
+                <form method="POST">
+                  <input type="hidden" name="_action" value="trash" />
+                  <input type="hidden" name="id" value={c.id} />
+                  <button type="submit" class="btn secondary" style="font-size:0.8rem;padding:4px 8px">Trash</button>
+                </form>
+              )}
+              {c.status === 'trash' && (
+                <form method="POST" onsubmit="return confirm('Permanently delete this comment?')">
+                  <input type="hidden" name="_action" value="delete" />
+                  <input type="hidden" name="id" value={c.id} />
+                  <button type="submit" class="btn danger" style="font-size:0.8rem;padding:4px 8px">Delete</button>
+                </form>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )}
+</AdminLayout>

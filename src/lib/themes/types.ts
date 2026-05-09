@@ -53,6 +53,34 @@ export type SitePost = {
 };
 
 /**
+ * Public-facing comment shape passed into theme templates. Plain text only —
+ * `content` is HTML-stripped server-side in lib/comments.ts before storage,
+ * and the template is expected to escape it on render.
+ */
+export type SiteComment = {
+  id: string;
+  authorName: string;
+  authorUrl: string | null;
+  content: string;
+  createdAt: Date;
+};
+
+/**
+ * Sticky-form payload used when a comment submission fails validation. The
+ * page re-renders with the user's previous values (so they don't have to
+ * retype) and a per-field error map keyed by the form field name.
+ */
+export type CommentFormState = {
+  values: {
+    authorName?: string;
+    authorEmail?: string;
+    authorUrl?: string;
+    content?: string;
+  };
+  errors: Record<string, string>;
+};
+
+/**
  * The object passed to every theme template. Templates can rely on every
  * field being present (helpers like `assetUrl` and `url.post` keep theme
  * authors from hand-stitching URLs that may change).
@@ -74,5 +102,10 @@ export type RenderContext = {
   };
   posts?: SitePost[];
   post?: SitePost;
+  comments?: SiteComment[];
+  /** Present only when the previous request was a failed comment submission. */
+  commentForm?: CommentFormState;
+  /** True after a successful comment POST so the template can show a banner. */
+  commentSubmitted?: boolean;
   year: number;
 };

@@ -13,6 +13,81 @@
               so emitting it raw here is safe. Never bypass that pipeline. */ %>
         <div class="prose"><%~ post.contentHtml %></div>
       </article>
+
+      <section id="comments" class="comments-section">
+        <h2 class="comments-heading">Comments (<%= (comments && comments.length) || 0 %>)</h2>
+
+        <% if (commentSubmitted) { %>
+          <div class="comment-success" role="status">
+            Thanks — your comment is awaiting moderation and will appear once approved.
+          </div>
+        <% } %>
+
+        <% if (comments && comments.length > 0) { %>
+          <ol class="comment-list">
+            <% comments.forEach(function (c) { %>
+              <li class="comment">
+                <div class="comment-avatar" aria-hidden="true"><%= (c.authorName[0] || '?').toUpperCase() %></div>
+                <div class="comment-body">
+                  <div class="comment-meta">
+                    <span class="comment-author">
+                      <% if (c.authorUrl) { %>
+                        <a href="<%= c.authorUrl %>" rel="nofollow ugc noopener" target="_blank"><%= c.authorName %></a>
+                      <% } else { %>
+                        <%= c.authorName %>
+                      <% } %>
+                    </span>
+                    <time class="comment-date" datetime="<%= c.createdAt.toISOString() %>"><%= c.createdAt.toLocaleDateString() %></time>
+                  </div>
+                  <% /* content is plain text, stripped of HTML on insert. We escape
+                        with <%= and then convert raw \n into <br> on the already-
+                        escaped string — safe because the only HTML in scope is the
+                        <br> tag we ourselves emit. */ %>
+                  <p class="comment-content"><%~ String(c.content).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\r?\n/g, '<br>') %></p>
+                </div>
+              </li>
+            <% }); %>
+          </ol>
+        <% } else { %>
+          <p class="comment-empty">No comments yet — be the first to share a thought.</p>
+        <% } %>
+
+        <h3 class="comment-form-heading">Leave a comment</h3>
+        <% var cf = commentForm || { values: {}, errors: {} }; %>
+        <% var errs = cf.errors || {}; %>
+        <% var vals = cf.values || {}; %>
+        <% if (Object.keys(errs).length > 0) { %>
+          <div class="comment-errors" role="alert">
+            <strong>Please fix the highlighted fields.</strong>
+          </div>
+        <% } %>
+        <form class="comment-form" method="POST" action="<%= url.post(post.slug) %>#comments" novalidate>
+          <div class="comment-form-row">
+            <div class="comment-field">
+              <label for="comment-name">Name</label>
+              <input id="comment-name" type="text" name="authorName" required maxlength="80" value="<%= vals.authorName || '' %>" />
+              <% if (errs.authorName) { %><small class="comment-field-error"><%= errs.authorName %></small><% } %>
+            </div>
+            <div class="comment-field">
+              <label for="comment-email">Email <span class="comment-hint">(won't be published)</span></label>
+              <input id="comment-email" type="email" name="authorEmail" required maxlength="200" value="<%= vals.authorEmail || '' %>" />
+              <% if (errs.authorEmail) { %><small class="comment-field-error"><%= errs.authorEmail %></small><% } %>
+            </div>
+          </div>
+          <div class="comment-field">
+            <label for="comment-url">Website <span class="comment-hint">(optional)</span></label>
+            <input id="comment-url" type="url" name="authorUrl" maxlength="500" placeholder="https://" value="<%= vals.authorUrl || '' %>" />
+            <% if (errs.authorUrl) { %><small class="comment-field-error"><%= errs.authorUrl %></small><% } %>
+          </div>
+          <div class="comment-field">
+            <label for="comment-content">Comment</label>
+            <textarea id="comment-content" name="content" rows="5" required maxlength="5000"><%= vals.content || '' %></textarea>
+            <% if (errs.content) { %><small class="comment-field-error"><%= errs.content %></small><% } %>
+          </div>
+          <button type="submit" class="comment-submit">Post comment</button>
+        </form>
+      </section>
+
       <p style="margin-top:32px"><a href="<%= url.home %>">← All posts</a></p>
     </main>
 <%~ include('partials/footer', it) %>

@@ -115,6 +115,15 @@ export function canEditPost(user: User | null, post: { authorId: string }): bool
   return user.id === post.authorId;
 }
 
+/**
+ * Moderation rights for the comment queue. Authors don't get to moderate —
+ * they can only edit their own posts, and giving them queue access would
+ * surface every commenter's email and IP across every post in the system.
+ */
+export function canModerateComments(user: User | null): boolean {
+  return user?.role === 'admin' || user?.role === 'editor';
+}
+
 /** Centralized so we can swap the ID strategy (e.g. ULID) in one place later. */
 export function newUserId(): string {
   return randomUUID();

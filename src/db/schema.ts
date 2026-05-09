@@ -85,6 +85,23 @@ export const themes = sqliteTable('themes', {
   installedAt: integer('installed_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
 });
 
+// Guest comments on posts. Stored as plain text — `content` is HTML-stripped
+// in lib/comments.ts before insert and escaped on render. Cascades on post
+// delete so removing a post removes its discussion. Every new comment lands
+// in `pending` and only appears publicly once a moderator approves it.
+export const comments = sqliteTable('comments', {
+  id: text('id').primaryKey(),
+  postId: text('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  authorName: text('author_name').notNull(),
+  authorEmail: text('author_email').notNull(),
+  authorUrl: text('author_url'),
+  content: text('content').notNull(),
+  status: text('status', { enum: ['pending', 'approved', 'spam', 'trash'] }).notNull().default('pending'),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+});
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -93,3 +110,5 @@ export type NewPost = typeof posts.$inferInsert;
 export type Media = typeof media.$inferSelect;
 export type Theme = typeof themes.$inferSelect;
 export type NewTheme = typeof themes.$inferInsert;
+export type Comment = typeof comments.$inferSelect;
+export type NewComment = typeof comments.$inferInsert;

@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import { resolveActiveTheme } from './registry.ts';
 import { getSetting } from '../settings.ts';
 import { applyFilters, doAction } from './hooks.ts';
-import type { RenderContext, SitePost, ThemeRecord } from './types.ts';
+import type { RenderContext, SitePost, SiteComment, CommentFormState, ThemeRecord } from './types.ts';
 
 const isProd = import.meta.env?.PROD ?? process.env.NODE_ENV === 'production';
 
@@ -61,6 +61,9 @@ type RenderInput = {
   pathname: string;
   posts?: SitePost[];
   post?: SitePost;
+  comments?: SiteComment[];
+  commentForm?: CommentFormState;
+  commentSubmitted?: boolean;
   status?: number;
 };
 
@@ -112,6 +115,9 @@ export async function renderTheme(input: RenderInput): Promise<Response> {
     },
     posts,
     post,
+    comments: input.comments,
+    commentForm: input.commentForm,
+    commentSubmitted: input.commentSubmitted,
     year: new Date().getFullYear(),
   };
 

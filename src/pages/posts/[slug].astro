@@ -4,18 +4,30 @@
  * never publicly visible) and renders via the active theme's `post.eta`.
  *
  * 404s render through the theme too so the look stays consistent on miss.
+ *
+ * Comments: this route also handles guest comment submissions. POSTs validate
+ * via `commentFormSchema`, insert through `createComment` (which strips HTML
+ * and lands the row as `pending`), then redirect with `?comment=pending#comments`
+ * so a refresh doesn't re-submit. On validation failure we re-render the same
+ * page with the user's previous values + per-field errors via `commentForm`
+ * in the render context.
  */
 import { db, schema } from '../../db/client.ts';
 import { eq, and } from 'drizzle-orm';
 import { renderTheme } from '../../lib/themes/render.ts';
+import { commentFormSchema, createComment, getApprovedComments } from '../../lib/comments.ts';
+import type { CommentFormState } from '../../lib/themes/types.ts';
 
 const { slug } = Astro.params;
 if (!slug) {
   return await renderTheme({ template: 'notFound', pathname: Astro.url.pathname, status: 404 });
 }
 
+// Fetch the post first — we need its id to attach a comment to, and we want
+// to 404 the same way regardless of GET or POST.
 const row = await db
   .select({
+    id: schema.posts.id,
     slug: schema.posts.slug,
     title: schema.posts.title,
     excerpt: schema.posts.excerpt,
@@ -32,9 +44,66 @@ if (!row) {
   return await renderTheme({ template: 'notFound', pathname: Astro.url.pathname, status: 404 });
 }
 
+let commentForm: CommentFormState | undefined;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const raw = {
+    postId: row.id,
+    authorName: String(form.get('authorName') ?? ''),
+    authorEmail: String(form.get('authorEmail') ?? ''),
+    authorUrl: String(form.get('authorUrl') ?? ''),
+    content: String(form.get('content') ?? ''),
+  };
+  const parsed = commentFormSchema.safeParse(raw);
+  if (parsed.success) {
+    await createComment(parsed.data, {
+      ipAddress: Astro.clientAddress,
+      userAgent: Astro.request.headers.get('user-agent') ?? undefined,
+    });
+    // Redirect after successful POST so a refresh doesn't double-submit.
+    // The fragment scrolls the page to the comments section.
+    return Astro.redirect(`/posts/${row.slug}?comment=pending#comments`);
+  }
+
+  // Re-render the page with the user's previous values and a field-keyed
+  // error map so the template can highlight the offending fields.
+  const errors: Record<string, string> = {};
+  for (const issue of parsed.error.issues) {
+    const key = String(issue.path[0] ?? '_');
+    if (!errors[key]) errors[key] = issue.message;
+  }
+  commentForm = {
+    values: {
+      authorName: raw.authorName,
+      authorEmail: raw.authorEmail,
+      authorUrl: raw.authorUrl,
+      content: raw.content,
+    },
+    errors,
+  };
+}
+
+const comments = await getApprovedComments(row.id);
+const commentSubmitted = Astro.url.searchParams.get('comment') === 'pending';
+
+// Strip the internal `id` from the post payload exposed to the template —
+// theme templates don't need it and shouldn't grow a dependency on it.
+const { id: _postId, ...publicPost } = row;
+
 return await renderTheme({
   template: 'post',
   pathname: Astro.url.pathname,
-  post: row,
+  post: publicPost,
+  comments: comments.map((c) => ({
+    id: c.id,
+    authorName: c.authorName,
+    authorUrl: c.authorUrl,
+    content: c.content,
+    createdAt: c.createdAt,
+  })),
+  commentForm,
+  commentSubmitted,
+  status: commentForm ? 400 : 200,
 });
 ---
