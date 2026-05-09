@@ -12,21 +12,39 @@
           <h2>No posts yet</h2>
           <p><a href="<%= url.admin %>">Sign in to the admin</a> to publish the first one.</p>
         </div>
-      <% } else { %>
-        <h2 id="posts" class="section-heading">Latest posts</h2>
-        <ul class="post-list">
-          <% for (const p of posts) { %>
-            <li class="post-card">
-              <h3 class="post-card-title"><a href="<%= url.post(p.slug) %>"><%= p.title %></a></h3>
-              <div class="post-meta">
-                <% if (p.publishedAt) { %><time datetime="<%= p.publishedAt.toISOString() %>"><%= p.publishedAt.toLocaleDateString() %></time><% } %>
-                <% if (p.authorName) { %> · by <%= p.authorName %><% } %>
-              </div>
-              <% if (p.excerpt) { %><p class="post-excerpt"><%= p.excerpt %></p><% } %>
-              <p class="post-card-more"><a href="<%= url.post(p.slug) %>">Read more →</a></p>
-            </li>
-          <% } %>
-        </ul>
+      <% } else {
+           const featured = posts[0];
+           const rest = posts.slice(1);
+      %>
+        <h2 id="posts" class="section-heading">Featured</h2>
+        <article class="featured-post">
+          <div class="featured-post-body">
+            <h3 class="featured-post-title"><a href="<%= url.post(featured.slug) %>"><%= featured.title %></a></h3>
+            <div class="post-meta">
+              <% if (featured.publishedAt) { %><time datetime="<%= featured.publishedAt.toISOString() %>"><%= featured.publishedAt.toLocaleDateString() %></time><% } %>
+              <% if (featured.authorName) { %> · by <%= featured.authorName %><% } %>
+            </div>
+            <% if (featured.excerpt) { %><p class="featured-post-excerpt"><%= featured.excerpt %></p><% } %>
+            <p class="featured-post-cta"><a href="<%= url.post(featured.slug) %>">Read article →</a></p>
+          </div>
+        </article>
+
+        <% if (rest.length > 0) { %>
+          <h2 class="section-heading section-heading--spaced">More posts</h2>
+          <ul class="post-list post-list--grid">
+            <% for (const p of rest) { %>
+              <li class="post-card">
+                <h3 class="post-card-title"><a href="<%= url.post(p.slug) %>"><%= p.title %></a></h3>
+                <div class="post-meta">
+                  <% if (p.publishedAt) { %><time datetime="<%= p.publishedAt.toISOString() %>"><%= p.publishedAt.toLocaleDateString() %></time><% } %>
+                  <% if (p.authorName) { %> · by <%= p.authorName %><% } %>
+                </div>
+                <% if (p.excerpt) { %><p class="post-excerpt"><%= p.excerpt %></p><% } %>
+                <p class="post-card-more"><a href="<%= url.post(p.slug) %>">Read more →</a></p>
+              </li>
+            <% } %>
+          </ul>
+        <% } %>
       <% } %>
     </main>
 <%~ include('partials/footer', it) %>

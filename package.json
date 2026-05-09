@@ -13,6 +13,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --experimental-strip-types ./src/db/migrate.ts",
     "db:seed": "node --experimental-strip-types ./src/db/seed.ts",
+    "db:seed-posts": "node --experimental-strip-types ./src/db/seed-posts.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
