@@ -1,5 +1,17 @@
     <footer class="site-footer">
-      <div class="container">© <%= year %> <%= site.title %> · powered by ZyphoraCMS</div>
+      <div class="container site-footer-inner">
+        <div class="site-footer-brand">
+          <a href="<%= url.home %>" class="site-footer-title"><%= site.title %></a>
+          <% if (site.description) { %><p class="site-footer-tagline"><%= site.description %></p><% } %>
+        </div>
+        <nav class="site-footer-nav" aria-label="Footer">
+          <a href="<%= url.home %>">Home</a>
+          <a href="<%= url.admin %>">Admin</a>
+        </nav>
+      </div>
+      <div class="site-footer-meta">
+        <div class="container">© <%= year %> <%= site.title %> · powered by ZyphoraCMS</div>
+      </div>
     </footer>
   </body>
 </html>

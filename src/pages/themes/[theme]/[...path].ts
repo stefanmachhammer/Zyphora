@@ -20,6 +20,8 @@ import { THEMES_DIR } from '../../../lib/themes/registry.ts';
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
+const isProd = import.meta.env?.PROD ?? process.env.NODE_ENV === 'production';
+
 const MIME: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -62,9 +64,7 @@ export const GET: APIRoute = async ({ params }) => {
     status: 200,
     headers: {
       'content-type': type,
-      // Long cache OK because asset URLs are rooted on theme slug + filename;
-      // a theme upgrade either changes the file or replaces the slug.
-      'cache-control': 'public, max-age=3600',
+      'cache-control': isProd ? 'public, max-age=3600' : 'no-cache',
     },
   });
 };

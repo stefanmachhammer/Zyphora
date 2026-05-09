@@ -1,18 +1,29 @@
 <%~ include('partials/head', it) %>
 <%~ include('partials/header', it) %>
-    <main class="container">
+    <section class="hero">
+      <div class="container">
+        <h1 class="hero-title"><%= site.title %></h1>
+        <% if (site.description) { %><p class="hero-tagline"><%= site.description %></p><% } %>
+      </div>
+    </section>
+    <main id="main" class="container">
       <% if (!posts || posts.length === 0) { %>
-        <p style="color:var(--muted)">No posts yet. <a href="<%= url.admin %>">Sign in to the admin</a> to publish the first one.</p>
+        <div class="empty-state">
+          <h2>No posts yet</h2>
+          <p><a href="<%= url.admin %>">Sign in to the admin</a> to publish the first one.</p>
+        </div>
       <% } else { %>
+        <h2 id="posts" class="section-heading">Latest posts</h2>
         <ul class="post-list">
           <% for (const p of posts) { %>
-            <li>
-              <h2><a href="<%= url.post(p.slug) %>"><%= p.title %></a></h2>
+            <li class="post-card">
+              <h3 class="post-card-title"><a href="<%= url.post(p.slug) %>"><%= p.title %></a></h3>
               <div class="post-meta">
                 <% if (p.publishedAt) { %><time datetime="<%= p.publishedAt.toISOString() %>"><%= p.publishedAt.toLocaleDateString() %></time><% } %>
                 <% if (p.authorName) { %> · by <%= p.authorName %><% } %>
               </div>
               <% if (p.excerpt) { %><p class="post-excerpt"><%= p.excerpt %></p><% } %>
+              <p class="post-card-more"><a href="<%= url.post(p.slug) %>">Read more →</a></p>
             </li>
           <% } %>
         </ul>

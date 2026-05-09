@@ -1,6 +1,6 @@
 <%~ include('partials/head', { ...it, pageTitle: 'Not found' }) %>
 <%~ include('partials/header', it) %>
-    <main class="container">
+    <main id="main" class="container">
       <h1>Not found</h1>
       <p style="color:var(--muted)">We couldn't find that page.</p>
       <p><a href="<%= url.home %>">← Back home</a></p>
