@@ -22,13 +22,14 @@ const sidebarMode = Astro.cookies.get('zyphora_sidebar')?.value === 'rail' ? 'ra
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
     <title>{title} · Zyphora</title>
   </head>
   <body class="admin" data-sidebar={sidebarMode}>
     <aside class="sidebar">
       <div class="brand">
-        <span class="brand-mark">Z</span>
-        <span class="brand-text">Zyphora</span>
+        <img src="/logo.png" alt="Zyphora" class="brand-logo" />
+        <img src="/favicon.png" alt="Zyphora" class="brand-mark" />
       </div>
       <nav>
         <a href="/admin" class={isActive('/admin') && path === '/admin' ? 'active' : ''} title="Dashboard">

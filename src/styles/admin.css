@@ -37,25 +37,23 @@ body.admin[data-sidebar="rail"] { grid-template-columns: 64px 1fr; }
   overflow-x: hidden;
 }
 .sidebar .brand {
-  font-weight: 700;
-  font-size: 1.05rem;
   margin-bottom: 24px;
+  padding: 0 4px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 4px;
+}
+.brand-logo {
+  width: 100%;
+  max-width: 160px;
+  height: auto;
+  display: block;
 }
 .brand-mark {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius);
-  background: var(--accent);
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-  flex: none;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  display: none;
 }
-.brand-text { white-space: nowrap; overflow: hidden; }
 
 .sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .sidebar nav a {
@@ -130,7 +128,8 @@ body.admin[data-sidebar="rail"] { grid-template-columns: 64px 1fr; }
 /* ── rail mode ─────────────────────────────────────────────────── */
 body.admin[data-sidebar="rail"] .sidebar { padding: 20px 8px 16px; }
 body.admin[data-sidebar="rail"] .brand { justify-content: center; }
-body.admin[data-sidebar="rail"] .brand-text,
+body.admin[data-sidebar="rail"] .brand-logo { display: none; }
+body.admin[data-sidebar="rail"] .brand-mark { display: block; }
 body.admin[data-sidebar="rail"] .nav-label,
 body.admin[data-sidebar="rail"] .user-text { display: none; }
 body.admin[data-sidebar="rail"] .sidebar nav a {
