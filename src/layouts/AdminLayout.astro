@@ -16,9 +16,12 @@ const { title = 'Admin' } = Astro.props as { title?: string };
 const path = Astro.url.pathname;
 const isActive = (p: string) => path === p || path.startsWith(p + '/');
 const sidebarMode = Astro.cookies.get('zyphora_sidebar')?.value === 'rail' ? 'rail' : 'full';
+// Theme is read server-side so the rendered HTML matches the user's last choice
+// on first paint — no flash of light when reloading in dark mode.
+const theme = Astro.cookies.get('zyphora_theme')?.value === 'dark' ? 'dark' : 'light';
 ---
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme={theme}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -77,27 +80,43 @@ const sidebarMode = Astro.cookies.get('zyphora_sidebar')?.value === 'rail' ? 'ra
           </button>
         </form>
       </div>
-      <button id="sidebar-toggle" type="button" class="sidebar-toggle" aria-label="Toggle sidebar">
-        <svg class="sidebar-toggle-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M15 6l-6 6 6 6"/>
-        </svg>
-      </button>
+      <div class="sidebar-controls">
+        <button id="theme-toggle" type="button" class="theme-toggle" aria-label="Toggle dark mode">
+          <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+          </svg>
+        </button>
+        <button id="sidebar-toggle" type="button" class="sidebar-toggle" aria-label="Toggle sidebar">
+          <svg class="sidebar-toggle-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 6l-6 6 6 6"/>
+          </svg>
+        </button>
+      </div>
     </aside>
     <main class="content">
       <slot />
     </main>
     <script is:inline>
-      // Sidebar toggle. Inlined (not a React island) because it touches a
-      // single class+cookie and we want it ready before any hydration runs —
-      // otherwise toggling would briefly flicker. The cookie is read by the
-      // server on next render so the chosen mode survives reloads.
+      // Sidebar + theme toggles. Inlined (not React islands) because they touch
+      // a single attribute+cookie and we want them ready before any hydration
+      // runs — otherwise toggling would briefly flicker. Cookies are read by
+      // the server on next render so the chosen modes survive reloads.
       (() => {
-        const btn = document.getElementById('sidebar-toggle');
-        if (!btn) return;
-        btn.addEventListener('click', () => {
+        const sidebarBtn = document.getElementById('sidebar-toggle');
+        sidebarBtn && sidebarBtn.addEventListener('click', () => {
           const next = document.body.dataset.sidebar === 'rail' ? 'full' : 'rail';
           document.body.dataset.sidebar = next;
           document.cookie = `zyphora_sidebar=${next}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
+        });
+        const themeBtn = document.getElementById('theme-toggle');
+        themeBtn && themeBtn.addEventListener('click', () => {
+          const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+          document.documentElement.dataset.theme = next;
+          document.cookie = `zyphora_theme=${next}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
         });
       })();
     </script>
