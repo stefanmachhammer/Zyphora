@@ -23,6 +23,8 @@ export type ThemeManifest = {
     index?: string;
     post?: string;
     notFound?: string;
+    /** Optional. Themes that don't ship a search template fall back to index.eta. */
+    search?: string;
   };
 };
 
@@ -105,6 +107,7 @@ export type RenderContext = {
     home: string;
     post: (slug: string) => string;
     admin: string;
+    search: (q: string) => string;
   };
   posts?: SitePost[];
   post?: SitePost;
@@ -117,5 +120,16 @@ export type RenderContext = {
    * it was auto-published and is already visible in the list below.
    */
   commentSubmitted?: 'pending' | 'approved' | null;
+  /**
+   * Present on the search route. `query` is the trimmed user input; `total`
+   * lets templates show "N results for X" without re-counting `posts.length`.
+   * Themes that ship a `search.eta` use this; themes without one fall back to
+   * `index.eta`, which can also check for `search?.query` if it wants to
+   * render the same results inline.
+   */
+  search?: {
+    query: string;
+    total: number;
+  };
   year: number;
 };

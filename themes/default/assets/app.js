@@ -158,10 +158,71 @@
     });
   }
 
+  function initSiteSearch() {
+    var form = document.querySelector('.site-search');
+    if (!form) return;
+    var toggle = form.querySelector('.site-search-toggle');
+    var input = form.querySelector('.site-search-input');
+    if (!toggle || !input) return;
+
+    // Treat an already-filled value (e.g. landed on /search?q=foo) as "open",
+    // so the user sees their query without having to click the icon.
+    var startOpen = input.value.trim().length > 0;
+
+    function setOpen(open) {
+      form.classList.toggle('is-open', open);
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.setAttribute('aria-label', open ? 'Search' : 'Open search');
+      input.setAttribute('tabindex', open ? '0' : '-1');
+      if (open) {
+        // Wait one frame so the width transition can run before focus snaps in.
+        requestAnimationFrame(function () { input.focus(); });
+      } else {
+        // Clear text on close so the next open starts fresh, unless the user
+        // explicitly navigated here with a query.
+        if (document.activeElement === input) input.blur();
+      }
+    }
+
+    setOpen(startOpen);
+
+    toggle.addEventListener('click', function (event) {
+      // While closed the icon is purely a toggle; while open we let the
+      // button act as the form's submit so a click runs the search.
+      var open = form.classList.contains('is-open');
+      if (!open) {
+        event.preventDefault();
+        setOpen(true);
+        return;
+      }
+      // Open with empty input: collapse instead of submitting nothing.
+      if (input.value.trim().length === 0) {
+        event.preventDefault();
+        setOpen(false);
+      }
+    });
+
+    // Esc collapses; click outside collapses (but not when the click landed
+    // inside the form, otherwise the toggle/input would close on their own clicks).
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && form.classList.contains('is-open')) {
+        setOpen(false);
+        toggle.focus();
+      }
+    });
+    document.addEventListener('click', function (event) {
+      if (!form.classList.contains('is-open')) return;
+      if (form.contains(event.target)) return;
+      if (input.value.trim().length > 0) return; // keep open while there's a query
+      setOpen(false);
+    });
+  }
+
   function init() {
     initThemeToggle();
     initNavToggle();
     initPostTabs();
+    initSiteSearch();
   }
 
   if (document.readyState === 'loading') {

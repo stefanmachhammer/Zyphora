@@ -49,21 +49,30 @@ function getEta(theme: ThemeRecord): Eta {
  * override defaults; if the override file is missing on disk we fall back to
  * the convention so a partial override doesn't break the site.
  */
-function templateFileFor(theme: ThemeRecord, key: 'index' | 'post' | 'notFound'): string {
-  const defaults = { index: 'index.eta', post: 'post.eta', notFound: '404.eta' } as const;
+function templateFileFor(theme: ThemeRecord, key: 'index' | 'post' | 'notFound' | 'search'): string {
+  const defaults = { index: 'index.eta', post: 'post.eta', notFound: '404.eta', search: 'search.eta' } as const;
   const override = theme.templates?.[key];
   if (override && existsSync(join(theme.dir, 'templates', override))) return override;
+  // For 'search' specifically, gracefully fall back to index.eta when the
+  // theme doesn't ship a dedicated results template — the index template can
+  // still render the same `posts` list (and can check `search?.query` if it
+  // wants to specialize). All other keys always have their default file.
+  if (key === 'search' && !existsSync(join(theme.dir, 'templates', defaults.search))) {
+    return defaults.index;
+  }
   return defaults[key];
 }
 
 type RenderInput = {
-  template: 'index' | 'post' | 'notFound';
+  template: 'index' | 'post' | 'notFound' | 'search';
   pathname: string;
   posts?: SitePost[];
   post?: SitePost;
   comments?: SiteComment[];
   commentForm?: CommentFormState;
   commentSubmitted?: 'pending' | 'approved' | null;
+  /** Populated on the /search route. Themes show "N results for query" from this. */
+  search?: { query: string; total: number };
   status?: number;
 };
 
@@ -112,12 +121,16 @@ export async function renderTheme(input: RenderInput): Promise<Response> {
       home: '/',
       post: (slug: string) => `/posts/${slug}`,
       admin: '/admin',
+      // URLSearchParams escapes the query exactly the way the /search route
+      // expects to receive it; never hand-roll `?q=` + the raw string.
+      search: (q: string) => `/search?${new URLSearchParams({ q }).toString()}`,
     },
     posts,
     post,
     comments: input.comments,
     commentForm: input.commentForm,
     commentSubmitted: input.commentSubmitted,
+    search: input.search,
     year: new Date().getFullYear(),
   };
 

@@ -14,6 +14,39 @@
         </nav>
 
         <div class="header-actions">
+          <form
+            class="site-search"
+            role="search"
+            action="/search"
+            method="get"
+            aria-label="Search posts"
+          >
+            <button
+              class="site-search-toggle"
+              type="button"
+              aria-expanded="false"
+              aria-controls="site-search-input"
+              aria-label="Open search"
+              title="Search"
+            >
+              <svg class="site-search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="2"/>
+                <line x1="16" y1="16" x2="20.5" y2="20.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <input
+              id="site-search-input"
+              class="site-search-input"
+              type="search"
+              name="q"
+              placeholder="Search posts…"
+              autocomplete="off"
+              maxlength="100"
+              tabindex="-1"
+              value="<%= (search && search.query) || '' %>"
+            />
+          </form>
+
           <button
             class="theme-toggle"
             type="button"

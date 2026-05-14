@@ -1,0 +1,37 @@
+<%~ include('partials/head', { ...it, pageTitle: search && search.query ? 'Search · ' + search.query : 'Search', metaDescription: site.description }) %>
+<%~ include('partials/header', it) %>
+    <main id="main" class="container">
+      <header class="search-header">
+        <h1 class="section-heading">Search</h1>
+        <% if (search && search.query) { %>
+          <p class="search-meta">
+            <%= search.total %> result<%= search.total === 1 ? '' : 's' %> for
+            &ldquo;<%= search.query %>&rdquo;
+          </p>
+        <% } else { %>
+          <p class="search-meta">Type a query in the search bar above to find posts.</p>
+        <% } %>
+      </header>
+
+      <% if (search && search.query && (!posts || posts.length === 0)) { %>
+        <div class="empty-state">
+          <h2>No matching posts</h2>
+          <p>Try a different word, or <a href="<%= url.home %>">browse all posts</a>.</p>
+        </div>
+      <% } else if (posts && posts.length > 0) { %>
+        <ul class="post-list post-list--grid">
+          <% for (const p of posts) { %>
+            <li class="post-card">
+              <h3 class="post-card-title"><a href="<%= url.post(p.slug) %>"><%= p.title %></a></h3>
+              <div class="post-meta">
+                <% if (p.publishedAt) { %><time datetime="<%= p.publishedAt.toISOString() %>"><%= p.publishedAt.toLocaleDateString() %></time><% } %>
+                <% if (p.authorName) { %> · by <%= p.authorName %><% } %>
+              </div>
+              <% if (p.excerpt) { %><p class="post-excerpt"><%= p.excerpt %></p><% } %>
+              <p class="post-card-more"><a href="<%= url.post(p.slug) %>">Read more →</a></p>
+            </li>
+          <% } %>
+        </ul>
+      <% } %>
+    </main>
+<%~ include('partials/footer', it) %>
