@@ -111,7 +111,11 @@ export type RenderContext = {
   comments?: SiteComment[];
   /** Present only when the previous request was a failed comment submission. */
   commentForm?: CommentFormState;
-  /** True after a successful comment POST so the template can show a banner. */
-  commentSubmitted?: boolean;
+  /**
+   * Set after a successful comment POST so the template can show a banner.
+   * `'pending'` means the comment is queued for moderation; `'approved'` means
+   * it was auto-published and is already visible in the list below.
+   */
+  commentSubmitted?: 'pending' | 'approved' | null;
   year: number;
 };

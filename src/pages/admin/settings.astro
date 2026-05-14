@@ -26,6 +26,10 @@ if (Astro.request.method === 'POST') {
     // app name so the public site never renders a nameless header.
     await setSetting('site_title', String(form.get('site_title') ?? '').trim() || 'Zyphora');
     await setSetting('site_description', String(form.get('site_description') ?? '').trim());
+    // Comment moderation. Stored as '1'/'0' to match how other boolean
+    // settings round-trip through the string-only settings table. Unchecked
+    // checkboxes don't appear in form data at all, so presence == "require".
+    await setSetting('require_comment_moderation', form.get('require_comment_moderation') !== null ? '1' : '0');
     success = 'Site settings saved.';
   } else if (action === 'password') {
     // Self-service password change. Order of checks matters: validate the
@@ -51,6 +55,9 @@ if (Astro.request.method === 'POST') {
 
 const siteTitle = await getSetting('site_title', 'Zyphora');
 const siteDescription = await getSetting('site_description', '');
+// Default: moderation on. New installs without the row applied yet read the
+// fallback, which matches the historical behavior (every comment queued).
+const requireModeration = (await getSetting('require_comment_moderation', '1')) === '1';
 ---
 <AdminLayout title="Settings">
   <h1>Settings</h1>
@@ -69,6 +76,13 @@ const siteDescription = await getSetting('site_description', '');
       <div class="field">
         <label>Site description</label>
         <textarea class="textarea" name="site_description" rows="2">{siteDescription}</textarea>
+      </div>
+      <div class="field">
+        <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" name="require_comment_moderation" checked={requireModeration} />
+          <span>Hold new comments for moderation before they appear publicly</span>
+        </label>
+        <small style="display:block;margin-top:6px;opacity:0.75">Individual posts can override this from the post edit page.</small>
       </div>
       <button class="btn" type="submit">Save</button>
     </form>

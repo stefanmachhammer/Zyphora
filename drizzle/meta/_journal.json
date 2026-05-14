@@ -43,6 +43,13 @@
       "when": 1778774981528,
       "tag": "0005_fancy_miek",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1778776023766,
+      "tag": "0006_familiar_kulan_gath",
+      "breakpoints": true
     }
   ]
 }

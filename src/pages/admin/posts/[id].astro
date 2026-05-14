@@ -30,6 +30,16 @@ if (!canEditPost(Astro.locals.user, post)) {
 
 let error: string | null = null;
 let success: string | null = null;
+// See new.astro for the same tri-state translation. Kept inline (and not
+// extracted to a helper) because the two pages have diverged before in small
+// ways and a shared module would force them back together.
+type ModerationChoice = 'default' | 'require' | 'auto';
+const moderationChoiceFromForm = (v: FormDataEntryValue | null): ModerationChoice => {
+  const s = String(v ?? 'default');
+  return s === 'require' || s === 'auto' ? s : 'default';
+};
+const moderationChoiceToValue = (c: ModerationChoice): boolean | null => (c === 'default' ? null : c === 'require');
+const moderationChoiceFromValue = (v: boolean | null): ModerationChoice => (v === null ? 'default' : v ? 'require' : 'auto');
 let values = {
   title: post.title,
   slug: post.slug,
@@ -38,6 +48,7 @@ let values = {
   status: post.status,
   category: post.category,
   commentsEnabled: post.commentsEnabled,
+  moderation: moderationChoiceFromValue(post.moderateComments),
 };
 
 if (Astro.url.searchParams.get('created') === '1') success = 'Post created.';
@@ -49,6 +60,7 @@ if (Astro.request.method === 'POST') {
   // Unchecked checkboxes are omitted from form data entirely — presence
   // alone means checked.
   const commentsEnabled = form.get('commentsEnabled') !== null;
+  const moderationChoice = moderationChoiceFromForm(form.get('moderation'));
   const parsed = postFormSchema.safeParse({
     title: form.get('title') ?? '',
     slug: form.get('slug') ?? '',
@@ -57,6 +69,7 @@ if (Astro.request.method === 'POST') {
     status: form.get('status') ?? 'draft',
     category: form.get('category') ?? 'news',
     commentsEnabled,
+    moderateComments: moderationChoiceToValue(moderationChoice),
   });
 
   if (!parsed.success) {
@@ -70,6 +83,7 @@ if (Astro.request.method === 'POST') {
       status: (form.get('status') === 'published' ? 'published' : 'draft'),
       category: (['news', 'travel', 'gadgets', 'reviews'].includes(rawCategory) ? rawCategory : 'news') as 'news' | 'travel' | 'gadgets' | 'reviews',
       commentsEnabled,
+      moderation: moderationChoice,
     };
   } else {
     // Pass the previous status + publishedAt so updatePost can preserve the
@@ -132,6 +146,14 @@ if (Astro.url.searchParams.get('saved') === '1') success = 'Post saved.';
           <input type="checkbox" name="commentsEnabled" checked={values.commentsEnabled} />
           <span>Allow comments on this post</span>
         </label>
+      </div>
+      <div class="field">
+        <label for="moderation">Comment moderation</label>
+        <select class="select" id="moderation" name="moderation">
+          <option value="default" selected={values.moderation === 'default'}>Use site default</option>
+          <option value="require" selected={values.moderation === 'require'}>Hold for moderation</option>
+          <option value="auto" selected={values.moderation === 'auto'}>Auto-approve</option>
+        </select>
       </div>
     </div>
     <button type="submit" class="btn">Save changes</button>

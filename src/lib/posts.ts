@@ -29,6 +29,11 @@ export const postFormSchema = z.object({
   // "field present" → true, "absent" → false before handing off to zod, so
   // the schema just needs to accept the resulting boolean.
   commentsEnabled: z.boolean().default(true),
+  // Tri-state moderation override: `null` = inherit site default,
+  // `true` = force moderation, `false` = auto-approve. The admin form
+  // posts a string ('default' | 'require' | 'auto') which the pages
+  // translate before validating.
+  moderateComments: z.union([z.boolean(), z.null()]).default(null),
 });
 
 export type PostFormInput = z.infer<typeof postFormSchema>;
@@ -75,6 +80,7 @@ export async function createPost(input: PostFormInput, authorId: string) {
     status: input.status,
     category: input.category,
     commentsEnabled: input.commentsEnabled,
+    moderateComments: input.moderateComments,
     authorId,
     publishedAt,
     createdAt: now,
@@ -115,6 +121,7 @@ export async function updatePost(id: string, input: PostFormInput, prevStatus: '
       status: input.status,
       category: input.category,
       commentsEnabled: input.commentsEnabled,
+      moderateComments: input.moderateComments,
       publishedAt,
       updatedAt: now,
     })

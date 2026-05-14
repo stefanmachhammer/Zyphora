@@ -63,7 +63,7 @@ type RenderInput = {
   post?: SitePost;
   comments?: SiteComment[];
   commentForm?: CommentFormState;
-  commentSubmitted?: boolean;
+  commentSubmitted?: 'pending' | 'approved' | null;
   status?: number;
 };
 

@@ -18,7 +18,11 @@
       <section id="comments" class="comments-section">
         <h2 class="comments-heading">Comments (<%= (comments && comments.length) || 0 %>)</h2>
 
-        <% if (commentSubmitted) { %>
+        <% if (commentSubmitted === 'approved') { %>
+          <div class="comment-success" role="status">
+            Thanks — your comment is posted.
+          </div>
+        <% } else if (commentSubmitted === 'pending') { %>
           <div class="comment-success" role="status">
             Thanks — your comment is awaiting moderation and will appear once approved.
           </div>

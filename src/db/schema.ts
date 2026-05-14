@@ -68,6 +68,12 @@ export const posts = sqliteTable('posts', {
   // Existing approved comments are kept in the DB regardless — disabling is
   // a display/intake switch, not a delete.
   commentsEnabled: integer('comments_enabled', { mode: 'boolean' }).notNull().default(true),
+  // Per-post moderation override. `null` means "inherit the site-wide
+  // `require_comment_moderation` setting" (the common case). `true` forces
+  // moderation on this post regardless of the site default; `false` makes new
+  // comments auto-approve. Kept tri-state on purpose: a boolean with a default
+  // can't distinguish "I picked the site default" from "I unchecked the box."
+  moderateComments: integer('moderate_comments', { mode: 'boolean' }),
   authorId: text('author_id').notNull().references(() => users.id),
   publishedAt: integer('published_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
