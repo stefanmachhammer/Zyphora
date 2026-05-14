@@ -19,6 +19,11 @@ export const UPLOADS_DIR = join(process.cwd(), 'public', 'uploads');
 
 const ALLOWED_MIME = new Set([
   'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+  // ICO has two MIME types in the wild — `image/x-icon` is the de-facto
+  // browser-sent value, `image/vnd.microsoft.icon` is what IANA registered.
+  // Allow both so favicon uploads work regardless of how the browser labels
+  // the file.
+  'image/x-icon', 'image/vnd.microsoft.icon',
   'application/pdf',
   'video/mp4', 'video/webm',
 ]);

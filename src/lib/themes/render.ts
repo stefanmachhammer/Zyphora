@@ -88,9 +88,12 @@ export async function renderTheme(input: RenderInput): Promise<Response> {
     return new Response('No theme installed', { status: 503, headers: { 'content-type': 'text/plain' } });
   }
 
-  const [siteTitle, siteDescription] = await Promise.all([
+  const [siteTitle, siteDescription, favicon] = await Promise.all([
     getSetting('site_title', 'Zyphora'),
     getSetting('site_description', ''),
+    // Empty string == "no favicon configured" so the template can drop the
+    // <link rel="icon"> rather than emit a broken href.
+    getSetting('favicon_url', ''),
   ]);
 
   // Filters let core code (and, eventually, plugins) transform values before
@@ -111,7 +114,7 @@ export async function renderTheme(input: RenderInput): Promise<Response> {
     : undefined;
 
   const ctx: RenderContext = {
-    site: { title: siteTitle, description: siteDescription },
+    site: { title: siteTitle, description: siteDescription, faviconUrl: favicon || null },
     theme: {
       slug: theme.slug,
       assetUrl: (path: string) => `/themes/${theme.slug}/${path.replace(/^\/+/, '')}`,

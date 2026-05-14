@@ -97,6 +97,13 @@ export type RenderContext = {
   site: {
     title: string;
     description: string;
+    /**
+     * Absolute or root-relative URL for the site favicon, or `null` when no
+     * favicon has been uploaded. Themes are expected to emit a `<link rel="icon">`
+     * when this is set and skip the tag otherwise — letting the browser fall
+     * back to its no-favicon glyph rather than 404'ing on a phantom link.
+     */
+    faviconUrl: string | null;
   };
   theme: {
     slug: string;
