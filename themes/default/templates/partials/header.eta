@@ -9,7 +9,6 @@
             <li><a href="<%= url.home %>#posts">Posts</a></li>
             <li><a href="<%= url.home %>#about">About</a></li>
             <li><a href="<%= url.home %>#contact">Contact</a></li>
-            <li><a href="<%= url.admin %>">Admin</a></li>
           </ul>
         </nav>
 
