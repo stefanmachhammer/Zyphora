@@ -18,6 +18,7 @@ import { db, schema } from '../../db/client.ts';
 import { eq } from 'drizzle-orm';
 import { THEMES_DIR, DEFAULT_THEME_SLUG, syncThemes } from './registry.ts';
 import { clearRenderCache } from './render.ts';
+import { lintTemplatesDir, formatLintIssues } from './lint.ts';
 import { getActiveThemeSlug, setActiveTheme } from './active.ts';
 
 const MAX_ZIP_BYTES = 5 * 1024 * 1024;
@@ -140,6 +141,17 @@ export async function installFromZip(buffer: Buffer): Promise<InstallResult> {
       }
       mkdirSync(dirname(outPath), { recursive: true });
       writeFileSync(outPath, e.raw.getData());
+    }
+
+    // Lint every `.eta` file the zip dropped under `templates/`. A theme with
+    // any of the failure modes catalogued in `lint.ts` (issue #5) would
+    // otherwise install cleanly and explode at first render — the user would
+    // see a SyntaxError pointing at compiled JS, with no obvious connection
+    // back to the upload. Catching it here keeps the failure local to the
+    // upload action and rolls back automatically via the catch below.
+    const lintIssues = lintTemplatesDir(join(dest, 'templates'));
+    if (lintIssues.length > 0) {
+      throw new Error(`Theme templates have errors:\n\n${formatLintIssues(lintIssues)}`);
     }
   } catch (err) {
     // Roll back partial extraction on any error so the dir doesn't end up

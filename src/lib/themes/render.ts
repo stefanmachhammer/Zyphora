@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { resolveActiveTheme } from './registry.ts';
 import { getSetting } from '../settings.ts';
 import { applyFilters, doAction } from './hooks.ts';
+import { lintTemplatesDir, formatLintIssues, type EtaLintIssue } from './lint.ts';
 import type {
   RenderContext,
   SitePost,
@@ -34,6 +35,40 @@ const isProd = import.meta.env?.PROD ?? process.env.NODE_ENV === 'production';
 
 /** One Eta instance per theme dir, lazily built. Cached in prod, fresh in dev. */
 const etaCache = new Map<string, Eta>();
+
+/**
+ * Cached lint result per theme slug. Populated on first render and reused
+ * for subsequent requests in prod. In dev the cache is bypassed so theme
+ * edits are re-linted on every render and authors see fixes immediately.
+ */
+const lintCache = new Map<string, EtaLintIssue[]>();
+
+/**
+ * Thrown when a theme's templates fail the Eta lint pass. Carries the raw
+ * issue list so an admin endpoint could surface them as structured data,
+ * but its message already formats them human-readably for log scrapers.
+ */
+export class EtaTemplateError extends Error {
+  override readonly name = 'EtaTemplateError';
+  readonly issues: EtaLintIssue[];
+  constructor(themeSlug: string, issues: EtaLintIssue[]) {
+    super(`Theme "${themeSlug}" has invalid Eta templates:\n\n${formatLintIssues(issues)}`);
+    this.issues = issues;
+  }
+}
+
+/**
+ * Lint the active theme's templates, throwing if any issues were found.
+ * See `lint.ts` for the catalogue of rules; the goal here is to convert a
+ * later cryptic Eta SyntaxError into an upfront message that names the
+ * source file + line.
+ */
+function ensureThemeLintsClean(theme: ThemeRecord): void {
+  const cached = isProd ? lintCache.get(theme.slug) : undefined;
+  const issues = cached ?? lintTemplatesDir(join(theme.dir, 'templates'));
+  if (isProd) lintCache.set(theme.slug, issues);
+  if (issues.length > 0) throw new EtaTemplateError(theme.slug, issues);
+}
 
 function getEta(theme: ThemeRecord): Eta {
   if (isProd) {
@@ -113,6 +148,13 @@ export async function renderTheme(input: RenderInput): Promise<Response> {
   if (!theme) {
     return new Response('No theme installed', { status: 503, headers: { 'content-type': 'text/plain' } });
   }
+
+  // Lint the templates before Eta sees them. The trade-off here is one extra
+  // pass over the source bytes per render (only in dev — prod caches the
+  // result), in exchange for converting a downstream "SyntaxError: Unexpected
+  // token '>'" with a compiled-JS frame into a message that names the actual
+  // .eta file and line. Templates are small; the cost is negligible.
+  ensureThemeLintsClean(theme);
 
   const [siteTitle, siteDescription, favicon] = await Promise.all([
     getSetting('site_title', 'Zyphora'),
@@ -194,4 +236,7 @@ export async function renderTheme(input: RenderInput): Promise<Response> {
 /** Drop the cached Eta instances. Called after a theme is installed/uninstalled. */
 export function clearRenderCache(): void {
   etaCache.clear();
+  // Drop lint results too — a freshly-installed theme could otherwise match
+  // a previous theme's lint cache by slug.
+  lintCache.clear();
 }
