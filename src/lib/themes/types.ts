@@ -89,6 +89,40 @@ export type CommentFormState = {
 };
 
 /**
+ * Minimal, public-safe shape of the signed-in user passed into theme
+ * templates. Themes use this to render "Hi, <name>" + a logout link and to
+ * branch on auth state. We deliberately omit the password hash and any other
+ * server-only fields so a template can't accidentally leak them.
+ */
+export type SiteUser = {
+  id: string;
+  email: string;
+  displayName: string;
+  role: string;
+};
+
+/**
+ * Sticky-form state for the public auth pages (`/login`, `/register`).
+ *
+ * On a failed submission the route re-renders the same template with the
+ * user's previous values pre-filled and a per-field error map keyed by form
+ * field name (e.g. `email`, `password`, `displayName`). A top-level `error`
+ * carries form-wide messages like "Invalid email or password." that aren't
+ * tied to a specific field.
+ *
+ * Themes can ignore `errors` entirely and just render `error` — the per-field
+ * map is purely additive for themes that want inline messages.
+ */
+export type AuthFormState = {
+  values: {
+    email?: string;
+    displayName?: string;
+  };
+  errors: Record<string, string>;
+  error?: string;
+};
+
+/**
  * The object passed to every theme template. Templates can rely on every
  * field being present (helpers like `assetUrl` and `url.post` keep theme
  * authors from hand-stitching URLs that may change).
@@ -121,6 +155,24 @@ export type RenderContext = {
   comments?: SiteComment[];
   /** Present only when the previous request was a failed comment submission. */
   commentForm?: CommentFormState;
+  /**
+   * The currently-signed-in user, or `null` for anonymous visitors. Always
+   * present (vs. `undefined`) so templates can write `<% if (currentUser) %>`
+   * without worrying about the key being missing.
+   */
+  currentUser: SiteUser | null;
+  /**
+   * Present on `/login` and `/register` when re-rendering after a failed
+   * submission, or with empty defaults on the first GET. Themes use this to
+   * pre-fill the form and surface inline errors.
+   */
+  authForm?: AuthFormState;
+  /**
+   * Where the auth pages will send the user after a successful login or
+   * registration. Themes round-trip this through a hidden input so the
+   * destination survives the POST. Always a same-origin path.
+   */
+  authRedirect?: string;
   /**
    * Set after a successful comment POST so the template can show a banner.
    * `'pending'` means the comment is queued for moderation; `'approved'` means

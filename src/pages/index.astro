@@ -29,5 +29,6 @@ return await renderTheme({
   template: 'index',
   pathname: Astro.url.pathname,
   posts,
+  currentUser: Astro.locals.user,
 });
 ---

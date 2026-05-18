@@ -21,7 +21,12 @@ import type { CommentFormState } from '../../lib/themes/types.ts';
 
 const { slug } = Astro.params;
 if (!slug) {
-  return await renderTheme({ template: 'notFound', pathname: Astro.url.pathname, status: 404 });
+  return await renderTheme({
+    template: 'notFound',
+    pathname: Astro.url.pathname,
+    status: 404,
+    currentUser: Astro.locals.user,
+  });
 }
 
 // Fetch the post first — we need its id to attach a comment to, and we want
@@ -44,7 +49,12 @@ const row = await db
   .get();
 
 if (!row) {
-  return await renderTheme({ template: 'notFound', pathname: Astro.url.pathname, status: 404 });
+  return await renderTheme({
+    template: 'notFound',
+    pathname: Astro.url.pathname,
+    status: 404,
+    currentUser: Astro.locals.user,
+  });
 }
 
 let commentForm: CommentFormState | undefined;
@@ -133,6 +143,7 @@ return await renderTheme({
   })),
   commentForm,
   commentSubmitted,
+  currentUser: Astro.locals.user,
   status: commentForm ? 400 : 200,
 });
 ---

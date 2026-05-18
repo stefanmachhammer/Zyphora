@@ -1,0 +1,75 @@
+<%~ include('partials/head', { ...it, pageTitle: 'Create an account' }) %>
+<%~ include('partials/header', it) %>
+    <main id="main" class="container auth-container">
+      <section class="auth-card" aria-labelledby="auth-heading">
+        <h1 id="auth-heading" class="auth-title">Create an account</h1>
+        <p class="auth-subtitle">Join <%= site.title %> in a few seconds.</p>
+
+        <% if (authForm && authForm.error) { %>
+          <div class="auth-alert" role="alert"><%= authForm.error %></div>
+        <% } %>
+
+        <form method="POST" class="auth-form" novalidate>
+          <% if (authRedirect) { %>
+            <input type="hidden" name="redirect" value="<%= authRedirect %>" />
+          <% } %>
+
+          <div class="auth-field">
+            <label for="auth-displayName">Display name</label>
+            <input
+              class="auth-input"
+              id="auth-displayName"
+              name="displayName"
+              type="text"
+              autocomplete="nickname"
+              maxlength="100"
+              required
+              autofocus
+              value="<%= (authForm && authForm.values.displayName) || '' %>"
+            />
+            <% if (authForm && authForm.errors.displayName) { %>
+              <p class="auth-field-error"><%= authForm.errors.displayName %></p>
+            <% } %>
+          </div>
+
+          <div class="auth-field">
+            <label for="auth-email">Email</label>
+            <input
+              class="auth-input"
+              id="auth-email"
+              name="email"
+              type="email"
+              autocomplete="email"
+              required
+              value="<%= (authForm && authForm.values.email) || '' %>"
+            />
+            <% if (authForm && authForm.errors.email) { %>
+              <p class="auth-field-error"><%= authForm.errors.email %></p>
+            <% } %>
+          </div>
+
+          <div class="auth-field">
+            <label for="auth-password">Password <span class="auth-hint">(min 8 characters)</span></label>
+            <input
+              class="auth-input"
+              id="auth-password"
+              name="password"
+              type="password"
+              autocomplete="new-password"
+              minlength="8"
+              required
+            />
+            <% if (authForm && authForm.errors.password) { %>
+              <p class="auth-field-error"><%= authForm.errors.password %></p>
+            <% } %>
+          </div>
+
+          <button class="auth-submit" type="submit">Create account</button>
+        </form>
+
+        <p class="auth-aside">
+          Already have an account? <a href="/login<%= authRedirect && authRedirect !== '/' ? '?redirect=' + encodeURIComponent(authRedirect) : '' %>">Sign in</a>.
+        </p>
+      </section>
+    </main>
+<%~ include('partials/footer', it) %>
