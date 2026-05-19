@@ -13,6 +13,10 @@
  */
 import { defineMiddleware } from 'astro:middleware';
 import { SESSION_COOKIE, getUserBySession, clearSessionCookie } from './lib/auth.ts';
+// Side-effect import: prints the boot watermark exactly once when Astro
+// loads the middleware module at server startup. The module self-guards
+// against duplicate prints during dev HMR.
+import './lib/banner.ts';
 
 export const onRequest = defineMiddleware(async (ctx, next) => {
   // Resolve the session cookie into a user record. Default to "anonymous";
