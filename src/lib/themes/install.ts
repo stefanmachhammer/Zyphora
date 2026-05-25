@@ -94,11 +94,20 @@ export async function installFromZip(buffer: Buffer): Promise<InstallResult> {
   const entries = zip.getEntries();
   if (entries.length === 0) throw new Error('Zip is empty');
 
-  const prefix = detectPrefix(entries.map((e) => e.entryName));
-  const stripped = entries.map((e) => ({
-    raw: e,
-    rel: prefix && e.entryName.startsWith(prefix) ? e.entryName.slice(prefix.length) : e.entryName,
-  }));
+  // Normalize entry names to POSIX separators. The zip spec mandates `/`, but
+  // some Windows zip tools (and adm-zip on Windows hosts) surface backslashes,
+  // which Linux treats as literal filename characters — files would land at
+  // `themes/<slug>/templates\index.eta` instead of `templates/index.eta`.
+  const entryNames = entries.map((e) => e.entryName.replace(/\\/g, '/'));
+
+  const prefix = detectPrefix(entryNames);
+  const stripped = entries.map((e, i) => {
+    const name = entryNames[i]!;
+    return {
+      raw: e,
+      rel: prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name,
+    };
+  });
 
   const manifestEntry = stripped.find((e) => e.rel === 'theme.json');
   if (!manifestEntry) throw new Error('Zip is missing theme.json at the top level');
