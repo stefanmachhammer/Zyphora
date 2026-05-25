@@ -87,21 +87,29 @@ function stripHtml(s: string): string {
 type CreateMeta = {
   ipAddress?: string;
   userAgent?: string;
+  /**
+   * Effective intake status. Defaults to `pending` so callers that don't care
+   * keep the historical behavior (queue everything). The route layer resolves
+   * the per-post override + site-wide default and passes the result here —
+   * keeping the policy decision out of this module so `createComment` stays a
+   * dumb writer.
+   */
+  initialStatus?: 'pending' | 'approved';
 };
 
 /**
- * Insert a new comment. Always lands as `pending` — moderation is required
- * before public display. Returns the generated id and the (always-`pending`)
- * status so the caller can compose a redirect / banner.
+ * Insert a new comment. Returns the generated id and the recorded status so
+ * the caller can branch its success banner ("posted" vs "awaiting moderation").
  */
 export async function createComment(
   input: CommentFormInput,
   meta: CreateMeta = {},
-): Promise<{ id: string; status: 'pending' }> {
+): Promise<{ id: string; status: 'pending' | 'approved' }> {
   const id = randomUUID();
   // Strip HTML from content; trim again post-strip in case removed tags
   // left leading/trailing whitespace.
   const content = stripHtml(input.content).trim();
+  const status = meta.initialStatus ?? 'pending';
   await db.insert(schema.comments).values({
     id,
     postId: input.postId,
@@ -109,11 +117,11 @@ export async function createComment(
     authorEmail: input.authorEmail,
     authorUrl: input.authorUrl ?? null,
     content,
-    status: 'pending',
+    status,
     ipAddress: meta.ipAddress ?? null,
     userAgent: meta.userAgent ?? null,
   });
-  return { id, status: 'pending' };
+  return { id, status };
 }
 
 /**

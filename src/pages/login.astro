@@ -1,0 +1,73 @@
+---
+/**
+ * Public login page — rendered by the active theme (not the admin shell).
+ *
+ * Flow:
+ *   - Already-signed-in visitors are bounced to `?redirect=` (or `/`).
+ *   - POST validates email + password against the `users` table; a single
+ *     generic error is shown for both "no such user" and "wrong password"
+ *     so attackers can't probe for valid emails.
+ *   - On success: issue a session, set the cookie, and redirect.
+ *
+ * The post-login redirect is locked to same-origin paths that don't start
+ * with `//` (which would otherwise be parsed as protocol-relative URLs and
+ * turn this form into an open redirect).
+ */
+import { db, schema } from '../db/client.ts';
+import { eq } from 'drizzle-orm';
+import { verifyPassword, createSession, setSessionCookie } from '../lib/auth.ts';
+import { renderTheme } from '../lib/themes/render.ts';
+import type { AuthFormState } from '../lib/themes/types.ts';
+
+function safeRedirect(raw: string | null): string {
+  if (!raw) return '/';
+  // Must be a same-origin path (`/foo`) and must not begin with `//` or `/\`
+  // (both can resolve to a different host depending on the parser).
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return '/';
+  return raw;
+}
+
+const redirectTo = safeRedirect(Astro.url.searchParams.get('redirect'));
+
+// Already signed in — there's nothing to do here.
+if (Astro.locals.user) {
+  return Astro.redirect(redirectTo);
+}
+
+const authForm: AuthFormState = { values: {}, errors: {} };
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const email = String(form.get('email') ?? '').trim().toLowerCase();
+  const password = String(form.get('password') ?? '');
+  // Themes round-trip the desired post-login destination through a hidden
+  // input so users land back where they tried to go even if the form was
+  // posted from a page other than the original entry point.
+  const postedRedirect = safeRedirect(String(form.get('redirect') ?? '') || redirectTo);
+  authForm.values.email = email;
+
+  if (!email || !password) {
+    authForm.error = 'Email and password are required.';
+  } else {
+    const user = await db.select().from(schema.users).where(eq(schema.users.email, email)).get();
+    if (!user || !(await verifyPassword(user.passwordHash, password))) {
+      // One generic message for both branches — see top-of-file comment.
+      authForm.error = 'Invalid email or password.';
+    } else {
+      const session = await createSession(user.id);
+      setSessionCookie(Astro, session.id, session.expiresAt);
+      return Astro.redirect(postedRedirect);
+    }
+  }
+}
+
+return await renderTheme({
+  template: 'login',
+  pathname: Astro.url.pathname,
+  currentUser: null,
+  authForm,
+  authRedirect: redirectTo,
+  // 400 on validation failure (POST that errored), 200 on the initial GET.
+  status: Astro.request.method === 'POST' && authForm.error ? 400 : 200,
+});
+---

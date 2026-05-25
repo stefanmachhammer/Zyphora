@@ -1,0 +1,111 @@
+---
+/**
+ * Public registration page — creates a `subscriber` account and signs the
+ * user in immediately. Rendered by the active theme.
+ *
+ * Self-signups always land in the `subscriber` role (empty permissions). The
+ * role is seeded by migration 0007; admins can rename it via the roles UI but
+ * the slug `subscriber` is what we write here. Anyone who needs to author
+ * posts gets promoted by an admin afterwards — this route does not expose a
+ * role dropdown.
+ *
+ * The post-register redirect is locked to same-origin paths for the same
+ * open-redirect reason as /login (see safeRedirect there for the details).
+ */
+import { db, schema } from '../db/client.ts';
+import { eq } from 'drizzle-orm';
+import { z } from 'zod';
+import { hashPassword, createSession, setSessionCookie, newUserId } from '../lib/auth.ts';
+import { renderTheme } from '../lib/themes/render.ts';
+import type { AuthFormState } from '../lib/themes/types.ts';
+
+const SUBSCRIBER_ROLE = 'subscriber';
+
+function safeRedirect(raw: string | null): string {
+  if (!raw) return '/';
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return '/';
+  return raw;
+}
+
+const redirectTo = safeRedirect(Astro.url.searchParams.get('redirect'));
+
+if (Astro.locals.user) {
+  return Astro.redirect(redirectTo);
+}
+
+// Field-level constraints. `min(8)` mirrors the admin user form; `max(200)`
+// on password is just a sanity bound so a giant input can't bog down Argon2.
+const registerSchema = z.object({
+  email: z.email({ message: 'Enter a valid email address.' }).trim().toLowerCase(),
+  displayName: z.string({ message: 'Display name is required.' }).trim().min(1, 'Display name is required.').max(100, 'Display name is too long.'),
+  password: z.string({ message: 'Password is required.' }).min(8, 'Password must be at least 8 characters.').max(200, 'Password is too long.'),
+});
+
+const authForm: AuthFormState = { values: {}, errors: {} };
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const rawEmail = String(form.get('email') ?? '').trim();
+  const rawDisplayName = String(form.get('displayName') ?? '').trim();
+  const password = String(form.get('password') ?? '');
+  const postedRedirect = safeRedirect(String(form.get('redirect') ?? '') || redirectTo);
+
+  // Echo the user's input back so a validation error doesn't wipe the form.
+  // We never echo the password — that'd be a UX gain at the cost of leaking
+  // it into the rendered HTML if the page is cached anywhere upstream.
+  authForm.values.email = rawEmail.toLowerCase();
+  authForm.values.displayName = rawDisplayName;
+
+  const parsed = registerSchema.safeParse({
+    email: rawEmail,
+    displayName: rawDisplayName,
+    password,
+  });
+
+  if (!parsed.success) {
+    // Project Zod's issue list into a per-field error map so themes can show
+    // messages inline. First message per field wins; the rest are dropped.
+    for (const issue of parsed.error.issues) {
+      const key = String(issue.path[0] ?? '_');
+      if (!authForm.errors[key]) authForm.errors[key] = issue.message;
+    }
+    authForm.error = 'Please fix the highlighted fields.';
+  } else {
+    const existing = await db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(eq(schema.users.email, parsed.data.email))
+      .get();
+    if (existing) {
+      // Email collision: same generic surface area as login — don't hint
+      // whether the address is registered ("an account with this email exists"
+      // is itself a probe vector). The duplicate is rejected, the user picks
+      // a different one or signs in.
+      authForm.errors.email = 'That email is not available.';
+      authForm.error = 'Please fix the highlighted fields.';
+    } else {
+      const userId = newUserId();
+      await db.insert(schema.users).values({
+        id: userId,
+        email: parsed.data.email,
+        passwordHash: await hashPassword(parsed.data.password),
+        displayName: parsed.data.displayName,
+        role: SUBSCRIBER_ROLE,
+      });
+      // Sign them in immediately so registration → first page view is one hop.
+      const session = await createSession(userId);
+      setSessionCookie(Astro, session.id, session.expiresAt);
+      return Astro.redirect(postedRedirect);
+    }
+  }
+}
+
+return await renderTheme({
+  template: 'register',
+  pathname: Astro.url.pathname,
+  currentUser: null,
+  authForm,
+  authRedirect: redirectTo,
+  status: Astro.request.method === 'POST' && authForm.error ? 400 : 200,
+});
+---

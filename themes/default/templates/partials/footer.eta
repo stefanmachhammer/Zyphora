@@ -6,7 +6,6 @@
         </div>
         <nav class="site-footer-nav" aria-label="Footer">
           <a href="<%= url.home %>">Home</a>
-          <a href="<%= url.admin %>">Admin</a>
         </nav>
       </div>
       <div class="site-footer-meta">

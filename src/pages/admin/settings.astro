@@ -11,8 +11,10 @@
 import AdminLayout from '../../layouts/AdminLayout.astro';
 import { getSetting, setSetting } from '../../lib/settings.ts';
 import { hashPassword, verifyPassword } from '../../lib/auth.ts';
+import { saveUpload, deleteUpload, publicUrl } from '../../lib/media.ts';
 import { db, schema } from '../../db/client.ts';
 import { eq } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 
 let success: string | null = null;
 let error: string | null = null;
@@ -26,7 +28,59 @@ if (Astro.request.method === 'POST') {
     // app name so the public site never renders a nameless header.
     await setSetting('site_title', String(form.get('site_title') ?? '').trim() || 'Zyphora');
     await setSetting('site_description', String(form.get('site_description') ?? '').trim());
+    // Comment moderation. Stored as '1'/'0' to match how other boolean
+    // settings round-trip through the string-only settings table. Unchecked
+    // checkboxes don't appear in form data at all, so presence == "require".
+    await setSetting('require_comment_moderation', form.get('require_comment_moderation') !== null ? '1' : '0');
     success = 'Site settings saved.';
+  } else if (action === 'favicon-upload') {
+    // Favicon upload. Files go through the same media pipeline as everything
+    // else (size + MIME guards live in lib/media.ts) so a corrupt or oversized
+    // upload here can't sneak past the same checks. The previous favicon —
+    // if any — is removed *after* the new one is written so a write failure
+    // doesn't leave the site with no icon.
+    const file = form.get('favicon');
+    if (!(file instanceof File) || file.size === 0) {
+      error = 'Please choose a favicon file.';
+    } else {
+      try {
+        const saved = await saveUpload(file);
+        await db.insert(schema.media).values({
+          id: randomUUID(),
+          filename: saved.filename,
+          originalName: file.name,
+          mimeType: saved.mimeType,
+          sizeBytes: saved.sizeBytes,
+          uploadedBy: Astro.locals.user!.id,
+        });
+        const url = publicUrl(saved.filename);
+        // Read the previous URL before overwriting so we can clean it up.
+        // Best-effort: a failed cleanup leaves an orphan in /uploads, but the
+        // site itself is correct.
+        const prev = await getSetting('favicon_url', '');
+        await setSetting('favicon_url', url);
+        if (prev && prev.startsWith('/uploads/')) {
+          const prevFilename = prev.slice('/uploads/'.length);
+          await deleteUpload(prevFilename);
+          await db.delete(schema.media).where(eq(schema.media.filename, prevFilename));
+        }
+        success = 'Favicon updated.';
+      } catch (e) {
+        error = e instanceof Error ? e.message : 'Upload failed.';
+      }
+    }
+  } else if (action === 'favicon-remove') {
+    // Drop the setting and clean up the file on disk + the media row. If the
+    // setting was already empty this is a no-op; we still surface a success
+    // banner so the action feels confirmed.
+    const prev = await getSetting('favicon_url', '');
+    if (prev && prev.startsWith('/uploads/')) {
+      const prevFilename = prev.slice('/uploads/'.length);
+      await deleteUpload(prevFilename);
+      await db.delete(schema.media).where(eq(schema.media.filename, prevFilename));
+    }
+    await setSetting('favicon_url', '');
+    success = 'Favicon removed.';
   } else if (action === 'password') {
     // Self-service password change. Order of checks matters: validate the
     // shape of the new password first (cheap), then confirm it matches,
@@ -51,6 +105,10 @@ if (Astro.request.method === 'POST') {
 
 const siteTitle = await getSetting('site_title', 'Zyphora');
 const siteDescription = await getSetting('site_description', '');
+// Default: moderation on. New installs without the row applied yet read the
+// fallback, which matches the historical behavior (every comment queued).
+const requireModeration = (await getSetting('require_comment_moderation', '1')) === '1';
+const faviconUrl = await getSetting('favicon_url', '');
 ---
 <AdminLayout title="Settings">
   <h1>Settings</h1>
@@ -70,8 +128,43 @@ const siteDescription = await getSetting('site_description', '');
         <label>Site description</label>
         <textarea class="textarea" name="site_description" rows="2">{siteDescription}</textarea>
       </div>
+      <div class="field">
+        <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" name="require_comment_moderation" checked={requireModeration} />
+          <span>Hold new comments for moderation before they appear publicly</span>
+        </label>
+        <small style="display:block;margin-top:6px;opacity:0.75">Individual posts can override this from the post edit page.</small>
+      </div>
       <button class="btn" type="submit">Save</button>
     </form>
+  </div>
+
+  <div class="card" style="margin-bottom:20px">
+    <h2 style="margin-top:0">Favicon</h2>
+    <p style="color:var(--muted);margin-top:0">Shown in browser tabs and bookmarks. PNG, SVG, or ICO recommended; 32×32 or larger.</p>
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px">
+      <div style="width:48px;height:48px;display:grid;place-items:center;background:var(--code-bg, #f0f1f4);border:1px solid var(--border, #e3e5ea);border-radius:6px;overflow:hidden">
+        {faviconUrl ? (
+          <img src={faviconUrl} alt="Current favicon" style="max-width:100%;max-height:100%;display:block" />
+        ) : (
+          <span style="font-size:0.75rem;color:var(--muted)">None</span>
+        )}
+      </div>
+      <div style="font-size:0.85rem;color:var(--muted)">
+        {faviconUrl ? <code>{faviconUrl}</code> : <span>No favicon set</span>}
+      </div>
+    </div>
+    <form method="POST" enctype="multipart/form-data" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <input type="hidden" name="_action" value="favicon-upload" />
+      <input class="input" type="file" name="favicon" accept="image/png,image/svg+xml,image/x-icon,image/vnd.microsoft.icon,image/jpeg,image/webp,.ico" required />
+      <button type="submit" class="btn">Upload</button>
+    </form>
+    {faviconUrl && (
+      <form method="POST" style="margin-top:12px" onsubmit="return confirm('Remove favicon?')">
+        <input type="hidden" name="_action" value="favicon-remove" />
+        <button type="submit" class="btn danger" style="font-size:0.85rem">Remove favicon</button>
+      </form>
+    )}
   </div>
 
   <div class="card">

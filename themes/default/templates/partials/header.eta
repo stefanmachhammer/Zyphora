@@ -9,11 +9,43 @@
             <li><a href="<%= url.home %>#posts">Posts</a></li>
             <li><a href="<%= url.home %>#about">About</a></li>
             <li><a href="<%= url.home %>#contact">Contact</a></li>
-            <li><a href="<%= url.admin %>">Admin</a></li>
           </ul>
         </nav>
 
         <div class="header-actions">
+          <form
+            class="site-search"
+            role="search"
+            action="/search"
+            method="get"
+            aria-label="Search posts"
+          >
+            <button
+              class="site-search-toggle"
+              type="button"
+              aria-expanded="false"
+              aria-controls="site-search-input"
+              aria-label="Open search"
+              title="Search"
+            >
+              <svg class="site-search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="2"/>
+                <line x1="16" y1="16" x2="20.5" y2="20.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <input
+              id="site-search-input"
+              class="site-search-input"
+              type="search"
+              name="q"
+              placeholder="Search posts…"
+              autocomplete="off"
+              maxlength="100"
+              tabindex="-1"
+              value="<%= (search && search.query) || '' %>"
+            />
+          </form>
+
           <button
             class="theme-toggle"
             type="button"
@@ -42,6 +74,21 @@
               <span class="theme-toggle-knob"></span>
             </span>
           </button>
+
+          <div class="site-auth">
+            <% if (currentUser) { %>
+              <span class="site-auth-greeting">Hi, <%= currentUser.displayName %></span>
+              <form method="POST" action="/logout" class="site-auth-logout-form">
+                <button type="submit" class="site-auth-logout">Log out</button>
+              </form>
+            <% } else { %>
+              <a
+                class="site-auth-link"
+                href="/login<%= url.pathname && url.pathname !== '/' && !url.pathname.startsWith('/login') && !url.pathname.startsWith('/register') ? '?redirect=' + encodeURIComponent(url.pathname) : '' %>"
+              >Log in</a>
+              <a class="site-auth-link is-primary" href="/register">Register</a>
+            <% } %>
+          </div>
 
           <button
             class="nav-toggle"

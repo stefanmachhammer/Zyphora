@@ -11,14 +11,27 @@ import TiptapEditor from '../../../components/TiptapEditor.tsx';
 import { postFormSchema, createPost } from '../../../lib/posts.ts';
 
 let error: string | null = null;
-let values: { title: string; slug: string; excerpt: string; contentHtml: string; status: 'draft' | 'published'; category: 'news' | 'travel' | 'gadgets' | 'reviews' } = {
-  title: '', slug: '', excerpt: '', contentHtml: '', status: 'draft', category: 'news',
+// Form-side representation of the tri-state moderation override. The DB stores
+// null/true/false; the form posts these strings so a stale form roundtrip
+// can't lose the distinction between "inherit" and "off."
+type ModerationChoice = 'default' | 'require' | 'auto';
+const moderationChoiceFromForm = (v: FormDataEntryValue | null): ModerationChoice => {
+  const s = String(v ?? 'default');
+  return s === 'require' || s === 'auto' ? s : 'default';
+};
+const moderationChoiceToValue = (c: ModerationChoice): boolean | null => (c === 'default' ? null : c === 'require');
+let values: { title: string; slug: string; excerpt: string; contentHtml: string; status: 'draft' | 'published'; category: 'news' | 'travel' | 'gadgets' | 'reviews'; commentsEnabled: boolean; moderation: ModerationChoice } = {
+  title: '', slug: '', excerpt: '', contentHtml: '', status: 'draft', category: 'news', commentsEnabled: true, moderation: 'default',
 };
 
 if (Astro.request.method === 'POST') {
   // Run the form through the shared zod schema (also used by the edit page)
   // so validation rules and error messages stay consistent.
   const form = await Astro.request.formData();
+  // Unchecked checkboxes don't appear in form data at all, so presence ==
+  // checked. Translate to a real boolean before validation.
+  const commentsEnabled = form.get('commentsEnabled') !== null;
+  const moderationChoice = moderationChoiceFromForm(form.get('moderation'));
   const parsed = postFormSchema.safeParse({
     title: form.get('title') ?? '',
     slug: form.get('slug') ?? '',
@@ -26,6 +39,8 @@ if (Astro.request.method === 'POST') {
     contentHtml: form.get('contentHtml') ?? '',
     status: form.get('status') ?? 'draft',
     category: form.get('category') ?? 'news',
+    commentsEnabled,
+    moderateComments: moderationChoiceToValue(moderationChoice),
   });
 
   if (!parsed.success) {
@@ -40,6 +55,8 @@ if (Astro.request.method === 'POST') {
       contentHtml: String(form.get('contentHtml') ?? ''),
       status: form.get('status') === 'published' ? 'published' : 'draft',
       category: (['news', 'travel', 'gadgets', 'reviews'].includes(rawCategory) ? rawCategory : 'news') as 'news' | 'travel' | 'gadgets' | 'reviews',
+      commentsEnabled,
+      moderation: moderationChoice,
     };
   } else {
     // Insert + redirect (PRG). The edit page picks up `?created=1` and
@@ -89,6 +106,20 @@ if (Astro.request.method === 'POST') {
           <option value="travel" selected={values.category === 'travel'}>Travel</option>
           <option value="gadgets" selected={values.category === 'gadgets'}>Gadgets</option>
           <option value="reviews" selected={values.category === 'reviews'}>Reviews</option>
+        </select>
+      </div>
+      <div class="field">
+        <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" name="commentsEnabled" checked={values.commentsEnabled} />
+          <span>Allow comments on this post</span>
+        </label>
+      </div>
+      <div class="field">
+        <label for="moderation">Comment moderation</label>
+        <select class="select" id="moderation" name="moderation">
+          <option value="default" selected={values.moderation === 'default'}>Use site default</option>
+          <option value="require" selected={values.moderation === 'require'}>Hold for moderation</option>
+          <option value="auto" selected={values.moderation === 'auto'}>Auto-approve</option>
         </select>
       </div>
     </div>

@@ -23,6 +23,8 @@ export type ThemeManifest = {
     index?: string;
     post?: string;
     notFound?: string;
+    /** Optional. Themes that don't ship a search template fall back to index.eta. */
+    search?: string;
   };
 };
 
@@ -50,6 +52,10 @@ export type SitePost = {
   contentHtml?: string;
   publishedAt: Date | null;
   authorName: string | null;
+  // Per-post comment toggle. Only populated on the single-post view; list
+  // views omit it. Themes should hide the comment form and the existing-
+  // comments section when false; the route enforces it server-side either way.
+  commentsEnabled?: boolean;
 };
 
 /**
@@ -83,6 +89,40 @@ export type CommentFormState = {
 };
 
 /**
+ * Minimal, public-safe shape of the signed-in user passed into theme
+ * templates. Themes use this to render "Hi, <name>" + a logout link and to
+ * branch on auth state. We deliberately omit the password hash and any other
+ * server-only fields so a template can't accidentally leak them.
+ */
+export type SiteUser = {
+  id: string;
+  email: string;
+  displayName: string;
+  role: string;
+};
+
+/**
+ * Sticky-form state for the public auth pages (`/login`, `/register`).
+ *
+ * On a failed submission the route re-renders the same template with the
+ * user's previous values pre-filled and a per-field error map keyed by form
+ * field name (e.g. `email`, `password`, `displayName`). A top-level `error`
+ * carries form-wide messages like "Invalid email or password." that aren't
+ * tied to a specific field.
+ *
+ * Themes can ignore `errors` entirely and just render `error` — the per-field
+ * map is purely additive for themes that want inline messages.
+ */
+export type AuthFormState = {
+  values: {
+    email?: string;
+    displayName?: string;
+  };
+  errors: Record<string, string>;
+  error?: string;
+};
+
+/**
  * The object passed to every theme template. Templates can rely on every
  * field being present (helpers like `assetUrl` and `url.post` keep theme
  * authors from hand-stitching URLs that may change).
@@ -91,6 +131,13 @@ export type RenderContext = {
   site: {
     title: string;
     description: string;
+    /**
+     * Absolute or root-relative URL for the site favicon, or `null` when no
+     * favicon has been uploaded. Themes are expected to emit a `<link rel="icon">`
+     * when this is set and skip the tag otherwise — letting the browser fall
+     * back to its no-favicon glyph rather than 404'ing on a phantom link.
+     */
+    faviconUrl: string | null;
   };
   theme: {
     slug: string;
@@ -101,13 +148,47 @@ export type RenderContext = {
     home: string;
     post: (slug: string) => string;
     admin: string;
+    search: (q: string) => string;
   };
   posts?: SitePost[];
   post?: SitePost;
   comments?: SiteComment[];
   /** Present only when the previous request was a failed comment submission. */
   commentForm?: CommentFormState;
-  /** True after a successful comment POST so the template can show a banner. */
-  commentSubmitted?: boolean;
+  /**
+   * The currently-signed-in user, or `null` for anonymous visitors. Always
+   * present (vs. `undefined`) so templates can write `<% if (currentUser) %>`
+   * without worrying about the key being missing.
+   */
+  currentUser: SiteUser | null;
+  /**
+   * Present on `/login` and `/register` when re-rendering after a failed
+   * submission, or with empty defaults on the first GET. Themes use this to
+   * pre-fill the form and surface inline errors.
+   */
+  authForm?: AuthFormState;
+  /**
+   * Where the auth pages will send the user after a successful login or
+   * registration. Themes round-trip this through a hidden input so the
+   * destination survives the POST. Always a same-origin path.
+   */
+  authRedirect?: string;
+  /**
+   * Set after a successful comment POST so the template can show a banner.
+   * `'pending'` means the comment is queued for moderation; `'approved'` means
+   * it was auto-published and is already visible in the list below.
+   */
+  commentSubmitted?: 'pending' | 'approved' | null;
+  /**
+   * Present on the search route. `query` is the trimmed user input; `total`
+   * lets templates show "N results for X" without re-counting `posts.length`.
+   * Themes that ship a `search.eta` use this; themes without one fall back to
+   * `index.eta`, which can also check for `search?.query` if it wants to
+   * render the same results inline.
+   */
+  search?: {
+    query: string;
+    total: number;
+  };
   year: number;
 };

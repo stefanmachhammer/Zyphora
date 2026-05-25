@@ -1,0 +1,80 @@
+---
+/**
+ * Search results route.
+ *
+ * Reads `q` from the query string and runs a case-insensitive LIKE across the
+ * post title, excerpt, and content body. Drafts are never searched — same
+ * rule as every other public route here.
+ *
+ * Why LIKE instead of FTS5: SQLite's full-text engine is great, but it needs
+ * a separate virtual table + triggers to stay in sync with `posts`. For the
+ * size of an indie CMS that's overkill. We can swap in FTS later by replacing
+ * just this route — the theme contract (a list of `posts` + `search.query`)
+ * stays the same.
+ */
+import { db, schema } from '../db/client.ts';
+import { and, eq, or, like, desc } from 'drizzle-orm';
+import { renderTheme } from '../lib/themes/render.ts';
+
+// Trim + cap the query so a giant string can't blow up the LIKE pattern.
+// Empty queries are valid — we render the empty-state with no results.
+const rawQuery = Astro.url.searchParams.get('q') ?? '';
+const query = rawQuery.trim().slice(0, 100);
+
+let posts: Array<{
+  slug: string;
+  title: string;
+  excerpt: string | null;
+  publishedAt: Date | null;
+  authorName: string | null;
+}> = [];
+
+if (query.length > 0) {
+  // SQLite's LIKE is case-insensitive for ASCII by default. Strip the wildcard
+  // characters from the user's query (rather than configuring an ESCAPE clause)
+  // so a search for "50%" can't accidentally match every post — and so we
+  // don't have to plumb a raw SQL fragment through drizzle's `like` helper.
+  const sanitized = query.replace(/[%_]/g, '');
+  if (sanitized.length === 0) {
+    // The query was entirely wildcards; treat as empty rather than match-all.
+    return await renderTheme({
+      template: 'search',
+      pathname: Astro.url.pathname,
+      posts: [],
+      search: { query, total: 0 },
+      currentUser: Astro.locals.user,
+    });
+  }
+  const pattern = `%${sanitized}%`;
+  posts = await db
+    .select({
+      slug: schema.posts.slug,
+      title: schema.posts.title,
+      excerpt: schema.posts.excerpt,
+      publishedAt: schema.posts.publishedAt,
+      authorName: schema.users.displayName,
+    })
+    .from(schema.posts)
+    .leftJoin(schema.users, eq(schema.users.id, schema.posts.authorId))
+    .where(
+      and(
+        eq(schema.posts.status, 'published'),
+        or(
+          like(schema.posts.title, pattern),
+          like(schema.posts.excerpt, pattern),
+          like(schema.posts.contentHtml, pattern),
+        ),
+      ),
+    )
+    .orderBy(desc(schema.posts.publishedAt))
+    .all();
+}
+
+return await renderTheme({
+  template: 'search',
+  pathname: Astro.url.pathname,
+  posts,
+  search: { query, total: posts.length },
+  currentUser: Astro.locals.user,
+});
+---

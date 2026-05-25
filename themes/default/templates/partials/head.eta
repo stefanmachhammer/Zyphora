@@ -9,6 +9,7 @@ const metaDescription = it.metaDescription ?? site.description;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title><%= pageTitle %></title>
     <% if (metaDescription) { %><meta name="description" content="<%= metaDescription %>" /><% } %>
+    <% if (site.faviconUrl) { %><link rel="icon" href="<%= site.faviconUrl %>" /><% } %>
     <script>
       (function () {
         try {

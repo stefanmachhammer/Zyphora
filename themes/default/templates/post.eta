@@ -14,10 +14,15 @@
         <div class="prose"><%~ post.contentHtml %></div>
       </article>
 
+      <% if (post.commentsEnabled !== false) { %>
       <section id="comments" class="comments-section">
         <h2 class="comments-heading">Comments (<%= (comments && comments.length) || 0 %>)</h2>
 
-        <% if (commentSubmitted) { %>
+        <% if (commentSubmitted === 'approved') { %>
+          <div class="comment-success" role="status">
+            Thanks — your comment is posted.
+          </div>
+        <% } else if (commentSubmitted === 'pending') { %>
           <div class="comment-success" role="status">
             Thanks — your comment is awaiting moderation and will appear once approved.
           </div>
@@ -83,6 +88,7 @@
           <button type="submit" class="comment-submit">Post comment</button>
         </form>
       </section>
+      <% } %>
 
       <p style="margin-top:32px"><a href="<%= url.home %>">← All posts</a></p>
     </main>

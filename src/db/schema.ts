@@ -62,6 +62,18 @@ export const posts = sqliteTable('posts', {
   contentHtml: text('content_html').notNull().default(''),
   status: text('status', { enum: ['draft', 'published'] }).notNull().default('draft'),
   category: text('category', { enum: ['news', 'travel', 'gadgets', 'reviews'] }).notNull().default('news'),
+  // Per-post comment toggle. Defaults to true so existing posts and the
+  // common case ("comments on") need no extra clicks; flip to false in the
+  // admin to suppress the comment form and hide the section from templates.
+  // Existing approved comments are kept in the DB regardless — disabling is
+  // a display/intake switch, not a delete.
+  commentsEnabled: integer('comments_enabled', { mode: 'boolean' }).notNull().default(true),
+  // Per-post moderation override. `null` means "inherit the site-wide
+  // `require_comment_moderation` setting" (the common case). `true` forces
+  // moderation on this post regardless of the site default; `false` makes new
+  // comments auto-approve. Kept tri-state on purpose: a boolean with a default
+  // can't distinguish "I picked the site default" from "I unchecked the box."
+  moderateComments: integer('moderate_comments', { mode: 'boolean' }),
   authorId: text('author_id').notNull().references(() => users.id),
   publishedAt: integer('published_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),

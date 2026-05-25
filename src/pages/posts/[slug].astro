@@ -16,11 +16,17 @@ import { db, schema } from '../../db/client.ts';
 import { eq, and } from 'drizzle-orm';
 import { renderTheme } from '../../lib/themes/render.ts';
 import { commentFormSchema, createComment, getApprovedComments } from '../../lib/comments.ts';
+import { getSetting } from '../../lib/settings.ts';
 import type { CommentFormState } from '../../lib/themes/types.ts';
 
 const { slug } = Astro.params;
 if (!slug) {
-  return await renderTheme({ template: 'notFound', pathname: Astro.url.pathname, status: 404 });
+  return await renderTheme({
+    template: 'notFound',
+    pathname: Astro.url.pathname,
+    status: 404,
+    currentUser: Astro.locals.user,
+  });
 }
 
 // Fetch the post first — we need its id to attach a comment to, and we want
@@ -33,6 +39,8 @@ const row = await db
     excerpt: schema.posts.excerpt,
     contentHtml: schema.posts.contentHtml,
     publishedAt: schema.posts.publishedAt,
+    commentsEnabled: schema.posts.commentsEnabled,
+    moderateComments: schema.posts.moderateComments,
     authorName: schema.users.displayName,
   })
   .from(schema.posts)
@@ -41,10 +49,25 @@ const row = await db
   .get();
 
 if (!row) {
-  return await renderTheme({ template: 'notFound', pathname: Astro.url.pathname, status: 404 });
+  return await renderTheme({
+    template: 'notFound',
+    pathname: Astro.url.pathname,
+    status: 404,
+    currentUser: Astro.locals.user,
+  });
 }
 
 let commentForm: CommentFormState | undefined;
+
+// Hard-stop any comment submission when the author has disabled comments on
+// this post. The form is hidden in the template too, but a stale tab (or a
+// scripted POST) shouldn't be able to bypass the toggle.
+if (Astro.request.method === 'POST' && !row.commentsEnabled) {
+  return new Response('Comments are disabled for this post.', {
+    status: 403,
+    headers: { 'content-type': 'text/plain' },
+  });
+}
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
@@ -57,13 +80,18 @@ if (Astro.request.method === 'POST') {
   };
   const parsed = commentFormSchema.safeParse(raw);
   if (parsed.success) {
-    await createComment(parsed.data, {
+    // Resolve the effective moderation policy: the per-post override wins
+    // when set, otherwise fall back to the site-wide setting (default on).
+    const siteRequiresModeration = (await getSetting('require_comment_moderation', '1')) === '1';
+    const moderate = row.moderateComments ?? siteRequiresModeration;
+    const { status } = await createComment(parsed.data, {
       ipAddress: Astro.clientAddress,
       userAgent: Astro.request.headers.get('user-agent') ?? undefined,
+      initialStatus: moderate ? 'pending' : 'approved',
     });
     // Redirect after successful POST so a refresh doesn't double-submit.
-    // The fragment scrolls the page to the comments section.
-    return Astro.redirect(`/posts/${row.slug}?comment=pending#comments`);
+    // Banner text branches on whether the comment was auto-approved.
+    return Astro.redirect(`/posts/${row.slug}?comment=${status}#comments`);
   }
 
   // Re-render the page with the user's previous values and a field-keyed
@@ -84,8 +112,14 @@ if (Astro.request.method === 'POST') {
   };
 }
 
-const comments = await getApprovedComments(row.id);
-const commentSubmitted = Astro.url.searchParams.get('comment') === 'pending';
+// Skip the fetch entirely when comments are disabled — disabling hides both
+// the form and any previously approved comments, so there's nothing to render.
+const comments = row.commentsEnabled ? await getApprovedComments(row.id) : [];
+// The post-submit redirect carries the final status so the template can pick
+// between "thanks, your comment is up" and "thanks, awaiting moderation."
+const commentSubmittedParam = Astro.url.searchParams.get('comment');
+const commentSubmitted: 'pending' | 'approved' | null =
+  commentSubmittedParam === 'pending' || commentSubmittedParam === 'approved' ? commentSubmittedParam : null;
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -109,6 +143,7 @@ return await renderTheme({
   })),
   commentForm,
   commentSubmitted,
+  currentUser: Astro.locals.user,
   status: commentForm ? 400 : 200,
 });
 ---
