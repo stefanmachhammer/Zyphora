@@ -72,12 +72,18 @@ export function readManifest(slug: string): ThemeManifest | null {
 /**
  * Scan the themes directory and return one record per valid theme.
  * Skips entries that aren't directories or lack a usable manifest.
+ *
+ * Dot-prefixed directories (`.staging-…`, `.backup-…`) are skipped — the
+ * theme installer uses those names while swapping an update into place, and
+ * a scan that lands mid-update would otherwise register a phantom theme row
+ * for the staging dir.
  */
 export function scanThemes(): ThemeManifest[] {
   if (!existsSync(THEMES_DIR)) return [];
   const entries = readdirSync(THEMES_DIR);
   const manifests: ThemeManifest[] = [];
   for (const entry of entries) {
+    if (entry.startsWith('.')) continue;
     const full = join(THEMES_DIR, entry);
     if (!statSync(full).isDirectory()) continue;
     const m = readManifest(entry);

@@ -12,7 +12,7 @@
  */
 import AdminLayout from '../../../layouts/AdminLayout.astro';
 import { listThemes } from '../../../lib/themes/registry.ts';
-import { activateTheme, installFromZip, uninstallTheme } from '../../../lib/themes/install.ts';
+import { activateTheme, installFromZip, uninstallTheme, updateFromZip } from '../../../lib/themes/install.ts';
 
 let success: string | null = null;
 let error: string | null = null;
@@ -42,6 +42,18 @@ if (Astro.request.method === 'POST') {
         const buf = Buffer.from(await file.arrayBuffer());
         const result = await installFromZip(buf);
         success = `Installed "${result.name}" v${result.version}.`;
+      }
+    } else if (action === 'update') {
+      const slug = String(form.get('slug') ?? '');
+      const file = form.get('file');
+      if (!(file instanceof File) || file.size === 0) {
+        error = 'Please choose a zip file.';
+      } else {
+        const buf = Buffer.from(await file.arrayBuffer());
+        const result = await updateFromZip(slug, buf);
+        success = result.fromVersion
+          ? `Updated "${result.name}" from v${result.fromVersion} to v${result.toVersion}.`
+          : `Updated "${result.name}" to v${result.toVersion}.`;
       }
     }
   } catch (e) {
@@ -81,7 +93,7 @@ const themes = await listThemes();
         </div>
         <div style="font-size:0.8rem;color:var(--muted);margin-bottom:6px">v{t.version}{t.author ? ` · ${t.author}` : ''}</div>
         {t.description && <p style="font-size:0.85rem;color:#3a3f4b;margin:8px 0">{t.description}</p>}
-        <div style="display:flex;gap:6px;margin-top:12px">
+        <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap">
           {!t.active && (
             <form method="POST">
               <input type="hidden" name="_action" value="activate" />
@@ -97,6 +109,25 @@ const themes = await listThemes();
             </form>
           )}
         </div>
+        {!t.bundled && (
+          <details style="margin-top:10px">
+            <summary style="font-size:0.8rem;color:var(--muted);cursor:pointer">Update from zip…</summary>
+            <form
+              method="POST"
+              enctype="multipart/form-data"
+              onsubmit={`return confirm('Replace "${t.name}" with the uploaded zip? The current files will be removed.')`}
+              style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap"
+            >
+              <input type="hidden" name="_action" value="update" />
+              <input type="hidden" name="slug" value={t.slug} />
+              <input class="input" type="file" name="file" accept=".zip,application/zip" required style="font-size:0.8rem" />
+              <button type="submit" class="btn" style="font-size:0.8rem;padding:4px 10px">Update</button>
+            </form>
+            <div style="color:var(--muted);font-size:0.75rem;margin-top:6px">
+              Zip slug must match <code>{t.slug}</code>. Replaces all files in this theme.
+            </div>
+          </details>
+        )}
       </div>
     ))}
   </div>

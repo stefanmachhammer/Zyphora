@@ -11,12 +11,13 @@
  */
 
 import AdmZip from 'adm-zip';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join, normalize, resolve, sep, dirname } from 'node:path';
 import { z } from 'zod';
 import { db, schema } from '../../db/client.ts';
 import { eq } from 'drizzle-orm';
-import { THEMES_DIR, DEFAULT_THEME_SLUG, syncThemes } from './registry.ts';
+import { THEMES_DIR, DEFAULT_THEME_SLUG, readManifest, syncThemes } from './registry.ts';
 import { clearRenderCache } from './render.ts';
 import { lintTemplatesDir, formatLintIssues } from './lint.ts';
 import { getActiveThemeSlug, setActiveTheme } from './active.ts';
@@ -67,20 +68,23 @@ function isSafeRelative(rel: string): boolean {
 }
 
 export type InstallResult = { slug: string; name: string; version: string };
+export type UpdateResult = {
+  slug: string;
+  name: string;
+  fromVersion: string | null;
+  toVersion: string;
+};
+
+type ParsedManifest = z.infer<typeof installManifestSchema>;
+type StrippedEntry = { raw: AdmZip.IZipEntry; rel: string };
 
 /**
- * Install a theme from an uploaded zip buffer.
- *
- * Steps:
- *  1. Size check on the compressed payload.
- *  2. Locate `theme.json`, validate it, derive the destination slug.
- *  3. Refuse to overwrite existing themes (admins must delete first — keeps
- *     accidental overwrites and version downgrades from being silent).
- *  4. Sum uncompressed sizes (zip-bomb guard) before writing anything.
- *  5. Extract entries one at a time, validating each path is safely scoped.
- *  6. Sync the DB so the new theme shows up in the registry immediately.
+ * Parse and validate an uploaded zip buffer without writing anything.
+ * Returns the entries (with any single wrapper dir stripped) and the
+ * parsed `theme.json`. Throws human-readable errors for every rejection
+ * case so callers can surface them verbatim in the admin UI.
  */
-export async function installFromZip(buffer: Buffer): Promise<InstallResult> {
+function parseThemeZip(buffer: Buffer): { stripped: StrippedEntry[]; manifest: ParsedManifest } {
   if (buffer.length === 0) throw new Error('Empty upload');
   if (buffer.length > MAX_ZIP_BYTES) throw new Error(`Theme zip exceeds ${MAX_ZIP_BYTES} bytes`);
 
@@ -101,7 +105,7 @@ export async function installFromZip(buffer: Buffer): Promise<InstallResult> {
   const entryNames = entries.map((e) => e.entryName.replace(/\\/g, '/'));
 
   const prefix = detectPrefix(entryNames);
-  const stripped = entries.map((e, i) => {
+  const stripped: StrippedEntry[] = entries.map((e, i) => {
     const name = entryNames[i]!;
     return {
       raw: e,
@@ -112,7 +116,7 @@ export async function installFromZip(buffer: Buffer): Promise<InstallResult> {
   const manifestEntry = stripped.find((e) => e.rel === 'theme.json');
   if (!manifestEntry) throw new Error('Zip is missing theme.json at the top level');
 
-  let manifest: z.infer<typeof installManifestSchema>;
+  let manifest: ParsedManifest;
   try {
     const parsed = JSON.parse(manifestEntry.raw.getData().toString('utf8'));
     manifest = installManifestSchema.parse(parsed);
@@ -120,11 +124,24 @@ export async function installFromZip(buffer: Buffer): Promise<InstallResult> {
     throw new Error(`Invalid theme.json: ${err instanceof Error ? err.message : 'parse error'}`);
   }
 
-  const slug = manifest.slug;
-  const dest = join(THEMES_DIR, slug);
-  if (existsSync(dest)) throw new Error(`A theme with slug "${slug}" is already installed; delete it first`);
+  return { stripped, manifest };
+}
 
-  // Sum uncompressed sizes before writing — stops zip bombs from filling disk.
+/**
+ * Extract validated zip entries into a fresh destination directory.
+ *
+ * Caller must ensure `dest` does not yet exist. On any failure (zip bomb,
+ * unsafe path, lint error) the partially-extracted directory is removed
+ * before the error is re-thrown — `dest` is either fully populated and
+ * lint-clean or absent.
+ *
+ * Steps:
+ *  1. Sum uncompressed sizes (zip-bomb guard).
+ *  2. Extract each entry, validating that its resolved path stays inside dest.
+ *  3. Lint the resulting `templates/` dir so render-time failures surface
+ *     here instead of on the next page render.
+ */
+function extractZipToDir(stripped: StrippedEntry[], dest: string): void {
   let total = 0;
   for (const e of stripped) {
     if (e.raw.isDirectory) continue;
@@ -134,9 +151,7 @@ export async function installFromZip(buffer: Buffer): Promise<InstallResult> {
     }
   }
 
-  if (!existsSync(THEMES_DIR)) mkdirSync(THEMES_DIR, { recursive: true });
   mkdirSync(dest, { recursive: true });
-
   try {
     for (const e of stripped) {
       if (e.raw.isDirectory || e.rel === '') continue;
@@ -157,7 +172,7 @@ export async function installFromZip(buffer: Buffer): Promise<InstallResult> {
     // otherwise install cleanly and explode at first render — the user would
     // see a SyntaxError pointing at compiled JS, with no obvious connection
     // back to the upload. Catching it here keeps the failure local to the
-    // upload action and rolls back automatically via the catch below.
+    // upload/update action.
     const lintIssues = lintTemplatesDir(join(dest, 'templates'));
     if (lintIssues.length > 0) {
       throw new Error(`Theme templates have errors:\n\n${formatLintIssues(lintIssues)}`);
@@ -168,10 +183,105 @@ export async function installFromZip(buffer: Buffer): Promise<InstallResult> {
     rmSync(dest, { recursive: true, force: true });
     throw err;
   }
+}
+
+/**
+ * Install a theme from an uploaded zip buffer.
+ *
+ * Refuses to overwrite existing themes — admins must delete first or call
+ * `updateFromZip` to replace an existing install in place. The hard
+ * separation keeps accidental overwrites and silent downgrades from
+ * happening through the install path.
+ */
+export async function installFromZip(buffer: Buffer): Promise<InstallResult> {
+  const { stripped, manifest } = parseThemeZip(buffer);
+  const slug = manifest.slug;
+  const dest = join(THEMES_DIR, slug);
+  if (existsSync(dest)) throw new Error(`A theme with slug "${slug}" is already installed; delete it first or use Update`);
+
+  if (!existsSync(THEMES_DIR)) mkdirSync(THEMES_DIR, { recursive: true });
+  extractZipToDir(stripped, dest);
 
   await syncThemes();
   clearRenderCache();
   return { slug, name: manifest.name, version: manifest.version };
+}
+
+/**
+ * Update an already-installed theme by replacing its directory with a fresh
+ * zip extraction.
+ *
+ * The update is "stage then swap":
+ *   1. Extract+lint the new zip into a hidden staging dir under THEMES_DIR
+ *      (same volume → rename is fast and stays atomic-ish on Windows).
+ *   2. Move the live dir aside to a hidden backup.
+ *   3. Move staging into the live slot.
+ *   4. Delete the backup.
+ *
+ * If step 3 fails, the backup is moved back so the previous install is
+ * restored. The render cache is cleared on success so the active theme
+ * picks up the new templates on the next request.
+ *
+ * Refuses:
+ *   - bundled themes (their source of truth is the codebase, not uploads)
+ *   - mismatched slugs (the zip's `theme.json` slug must equal the target)
+ *   - missing target (caller should `installFromZip` instead)
+ */
+export async function updateFromZip(slug: string, buffer: Buffer): Promise<UpdateResult> {
+  if (slug === DEFAULT_THEME_SLUG) {
+    throw new Error('Cannot update the bundled default theme — it ships with the codebase');
+  }
+  const dest = join(THEMES_DIR, slug);
+  if (!existsSync(dest)) throw new Error(`Theme "${slug}" is not installed`);
+
+  const { stripped, manifest } = parseThemeZip(buffer);
+  if (manifest.slug !== slug) {
+    throw new Error(
+      `Zip slug "${manifest.slug}" does not match target "${slug}". To install a new theme, delete this one and use the upload form.`,
+    );
+  }
+
+  const prevManifest = readManifest(slug);
+  const fromVersion = prevManifest?.version ?? null;
+
+  // Stage extraction inside THEMES_DIR so the eventual rename is same-volume.
+  // The dot prefix keeps `scanThemes` from picking the staging dir up if a
+  // request lands mid-update (registry skips dot-prefixed entries).
+  const staging = join(THEMES_DIR, `.staging-${slug}-${randomUUID()}`);
+  extractZipToDir(stripped, staging);
+
+  // Swap. We move the current install aside first so we can roll back if the
+  // staging→live rename fails (rare on the same volume, but possible if a
+  // file inside is locked on Windows).
+  const backup = join(THEMES_DIR, `.backup-${slug}-${randomUUID()}`);
+  try {
+    renameSync(dest, backup);
+  } catch (err) {
+    rmSync(staging, { recursive: true, force: true });
+    throw err;
+  }
+  try {
+    renameSync(staging, dest);
+  } catch (err) {
+    // Restore the previous install. If even the rollback fails the live dir
+    // is gone; surface both errors so the admin can recover manually.
+    try {
+      renameSync(backup, dest);
+    } catch (restoreErr) {
+      throw new Error(
+        `Failed to swap in new theme (${err instanceof Error ? err.message : String(err)}) ` +
+          `and failed to restore previous theme (${restoreErr instanceof Error ? restoreErr.message : String(restoreErr)}). ` +
+          `Previous install is at ${backup}.`,
+      );
+    }
+    rmSync(staging, { recursive: true, force: true });
+    throw err;
+  }
+  rmSync(backup, { recursive: true, force: true });
+
+  await syncThemes();
+  clearRenderCache();
+  return { slug, name: manifest.name, fromVersion, toVersion: manifest.version };
 }
 
 /**
