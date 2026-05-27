@@ -42,6 +42,9 @@ body {
   color: var(--text);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
 }
 body.nav-open { overflow: hidden; }
 
@@ -598,7 +601,7 @@ article.post .post-meta { font-size: 0.9rem; }
 .site-footer {
   border-top: 1px solid var(--border);
   background: var(--surface);
-  margin-top: 40px;
+  margin-top: auto;
 }
 .site-footer-inner {
   max-width: var(--max-width);
