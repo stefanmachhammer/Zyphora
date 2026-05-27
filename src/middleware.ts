@@ -17,6 +17,11 @@ import { SESSION_COOKIE, getUserBySession, clearSessionCookie } from './lib/auth
 // loads the middleware module at server startup. The module self-guards
 // against duplicate prints during dev HMR.
 import './lib/banner.ts';
+// Side-effect import: kicks off a one-shot, fire-and-forget check against
+// the GitHub releases API and prints a notice if a newer version of the
+// CMS is available. Same dev-HMR guard as the banner. Opt out with
+// ZYPHORA_NO_UPDATE_CHECK=1.
+import './lib/update-check.ts';
 
 export const onRequest = defineMiddleware(async (ctx, next) => {
   // Resolve the session cookie into a user record. Default to "anonymous";
