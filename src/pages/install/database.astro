@@ -1,0 +1,138 @@
+---
+/**
+ * Installer step 1 — database credentials.
+ *
+ * The wizard's job here is to make a fresh-checkout operator never need to
+ * touch a terminal or hand-edit a `.env` file. They enter host/port/user/
+ * password/database name, we open a one-shot pool to verify the credentials
+ * work, then write the values to `.env`, patch them into `process.env` in
+ * the live server, and trigger a pool rebuild. The next request flows
+ * straight into step 2.
+ *
+ * Failure modes are caught and surfaced inline. We deliberately do NOT
+ * write `.env` before the connection test passes — otherwise a typo would
+ * lock the operator out, requiring SSH access to repair the file.
+ *
+ * Already-installed lockout is enforced in middleware, but the GET handler
+ * below also bails to /admin if it discovers DB is already configured and
+ * usable, just in case someone navigates directly here.
+ */
+import '../../styles/admin.css';
+import { testConnection, reloadDbConfig } from '../../db/client.ts';
+import { writeEnvVars } from '../../lib/env-file.ts';
+import { resetInstallStateCache, getInstallState } from '../../lib/install.ts';
+
+const theme = Astro.cookies.get('zyphora_theme')?.value === 'dark' ? 'dark' : 'light';
+
+// Form-state defaults. We prefill from existing env so a partial install
+// (DB configured but schema not yet applied) doesn't make the operator
+// retype everything. Password is never echoed back, even when present.
+let host = process.env.DB_HOST ?? 'localhost';
+let port = process.env.DB_PORT ?? '3306';
+let user = process.env.DB_USER ?? '';
+let database = process.env.DB_NAME ?? '';
+let error: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  host = String(form.get('host') ?? '').trim();
+  port = String(form.get('port') ?? '3306').trim() || '3306';
+  user = String(form.get('user') ?? '').trim();
+  const password = String(form.get('password') ?? '');
+  database = String(form.get('database') ?? '').trim();
+
+  const portNum = Number(port);
+  if (!host || !user || !password || !database) {
+    error = 'Host, user, password, and database name are all required.';
+  } else if (!Number.isFinite(portNum) || portNum < 1 || portNum > 65535) {
+    error = 'Port must be a number between 1 and 65535.';
+  } else {
+    // Test connection before persisting anything. mysql2's error messages
+    // are usually specific enough to be useful in the UI ("Access denied
+    // for user X", "Unknown database Y", etc.).
+    const testError = await testConnection({ host, port: portNum, user, password, database });
+    if (testError) {
+      error = `Could not connect: ${testError}`;
+    } else {
+      // Persist to .env atomically. Only the keys we care about are
+      // touched; any other env entries the operator has already set are
+      // preserved as-is.
+      writeEnvVars({
+        DB_HOST: host,
+        DB_PORT: String(portNum),
+        DB_USER: user,
+        DB_PASS: password,
+        DB_NAME: database,
+      });
+      // Patch the live process so the next state probe and the next query
+      // both see the new credentials without a restart.
+      process.env.DB_HOST = host;
+      process.env.DB_PORT = String(portNum);
+      process.env.DB_USER = user;
+      process.env.DB_PASS = password;
+      process.env.DB_NAME = database;
+      await reloadDbConfig();
+      resetInstallStateCache();
+      return Astro.redirect('/install/site');
+    }
+  }
+}
+
+// GET-time: if the DB is already configured AND reachable AND the admin
+// exists, no reason to be here.
+if (Astro.request.method === 'GET') {
+  const state = await getInstallState();
+  if (state === 'installed') return Astro.redirect('/admin');
+}
+---
+<!doctype html>
+<html lang="en" data-theme={theme}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <title>Install Zyphora · Database</title>
+  </head>
+  <body class="login-page">
+    <form method="POST" class="install-card" autocomplete="off">
+      <h1>Install Zyphora</h1>
+      <p class="subtitle">Connect to your MySQL database to begin.</p>
+
+      <div class="install-steps">
+        <span class="install-step active"><span class="pill">1</span>Database</span>
+        <span class="install-step"><span class="pill">2</span>Admin</span>
+      </div>
+
+      {error && <div class="alert error">{error}</div>}
+
+      <div class="install-row">
+        <div class="field">
+          <label for="host">MySQL host</label>
+          <input class="input" id="host" name="host" type="text" value={host} required autofocus />
+        </div>
+        <div class="field">
+          <label for="port">Port</label>
+          <input class="input" id="port" name="port" type="number" min="1" max="65535" value={port} required />
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="database">Database name</label>
+        <input class="input" id="database" name="database" type="text" value={database} required />
+      </div>
+      <p class="install-hint">The database must already exist and be empty. Zyphora won't create or drop databases.</p>
+
+      <div class="field">
+        <label for="user">MySQL user</label>
+        <input class="input" id="user" name="user" type="text" value={user} required />
+      </div>
+
+      <div class="field">
+        <label for="password">MySQL password</label>
+        <input class="input" id="password" name="password" type="password" required />
+      </div>
+
+      <button class="btn" type="submit" style="width:100%">Test connection & continue</button>
+    </form>
+  </body>
+</html>
