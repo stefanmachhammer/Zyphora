@@ -30,7 +30,7 @@ if (existing) {
     displayName,
     role: 'admin',
   });
-  console.log(`Admin user created: ${email} / ${password}`);
+  console.log(`Admin user created: ${email}`);
   console.log('Change the password after first login.');
 }
 
