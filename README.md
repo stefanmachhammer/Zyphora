@@ -4,7 +4,7 @@ A self-hosted CMS built on Astro. SSR public site, admin panel at `/admin`, MySQ
 
 ## Stack
 
-- **Astro 6** with Node adapter (`output: 'server'`)
+- **Astro 7** with Node adapter (`output: 'server'`)
 - **MySQL** via `mysql2` + **Drizzle ORM**
 - **React** island for the **TipTap** rich-text editor
 - **Eta** templates for runtime themes
@@ -18,8 +18,9 @@ A self-hosted CMS built on Astro. SSR public site, admin panel at `/admin`, MySQ
 - **Posts** — draft/publish workflow, slug auto-generation, rich-text editor (headings, lists, blockquotes, code blocks, links, inline code)
 - **Categories** — built-in `news`, `travel`, `gadgets`, `reviews` with a per-post select in the editor
 - **Media library** — upload images, video, and PDFs (10 MB limit) stored under `public/uploads/` with metadata in MySQL
-- **Users & roles** — `admin`, `editor`, `author`; admins manage users, editors edit any post, authors edit only their own
-- **Settings** — site title/description, active theme, password change
+- **Users & roles** — four system roles (`admin`, `editor`, `author`, `subscriber`) plus custom roles with per-permission grants, managed from the admin
+- **Comments** — per-post comments on the public site with a moderation queue in the admin and optional Google reCAPTCHA v2 spam protection
+- **Settings** — site title/description, active theme, reCAPTCHA keys, password change
 
 ### Admin UI
 - **Collapsible sidebar** — full or rail mode, persisted per-user via cookie
@@ -41,6 +42,8 @@ A self-hosted CMS built on Astro. SSR public site, admin panel at `/admin`, MySQ
 
 ### Public site
 - Server-rendered post list at `/` and post detail at `/posts/[slug]`
+- Full-text search at `/search`
+- Visitor accounts — public login/register pages; self-signups land in the `subscriber` role
 - Drafts are never exposed publicly
 
 ## Requirements
@@ -50,7 +53,22 @@ A self-hosted CMS built on Astro. SSR public site, admin panel at `/admin`, MySQ
 
 ## Quick start
 
-Create an empty MySQL database and point the app at it via environment variables:
+You need a running MySQL 8+ server with an empty database (Zyphora won't create or drop databases).
+
+### Web installer (default)
+
+No env vars, no CLI scripts:
+
+```sh
+npm install
+npm run dev             # http://localhost:4321 — the installer takes over
+```
+
+Every request is funneled to `/install` until the CMS is set up. The wizard collects your DB credentials (tests the connection, then writes them to `.env`), applies migrations, seeds the system roles, and creates your admin account from a form. When it finishes you're logged in and `/install` disappears.
+
+### Headless / scripted deploys
+
+Set the DB env vars and run the CLI scripts directly — they share their logic with the installer, so the end state is identical:
 
 ```sh
 export DB_HOST=localhost
@@ -59,8 +77,6 @@ export DB_USER=zyphora
 export DB_PASS=...
 export DB_NAME=zyphora
 ```
-
-Then:
 
 ```sh
 npm install
@@ -106,9 +122,12 @@ src/
 │   └── themes/        registry, install, render, hooks (WP-style)
 ├── middleware.ts      session lookup + admin route guard
 ├── pages/
-│   ├── admin/         dashboard, posts CRUD, media, themes, users, settings
+│   ├── admin/         dashboard, posts CRUD, media, comments, themes, users, roles, settings
+│   ├── install/       first-run web installer (DB credentials, migrate, seed, admin account)
 │   ├── posts/[slug]   public post detail
 │   ├── themes/[…]     theme asset serving
+│   ├── search.astro   public full-text search
+│   ├── login.astro    visitor login (register.astro for signups)
 │   └── index.astro    public home (post list)
 └── styles/
 themes/
@@ -119,7 +138,7 @@ public/                static assets and uploads (uploads gitignored)
 
 ## Configuration
 
-Database connection (all four required; the app fails fast at boot if any are missing):
+Database connection — written to `.env` by the web installer, or set manually for headless deploys. The server boots without them (so the installer can run); anything that actually touches the DB fails with a clear error until they're present:
 
 | Variable    | Default | Description                                              |
 | ----------- | ------- | -------------------------------------------------------- |
@@ -165,10 +184,9 @@ Sessions currently live in MySQL alongside everything else. The app server itsel
 Major work on deck:
 
 - **Plugins** — uploadable plugin system on top of the existing hooks registry. Themes will stay runtime-template-only; plugins get their own threat model and a clear extension API.
-- **Comments** — per-post comments on the public site, plus a moderation queue and spam controls in a dedicated admin section.
 - **Analytics** — built-in, privacy-first pageview tracking with a top-posts dashboard, referrer breakdown, and per-post stats. No third-party cookies.
 - **Email** — outbound SMTP for transactional notifications (new comment, password reset, mentions) and an admin section for templates and delivery logs.
-- **Default theme** — keep iterating: search, pagination, tags, author pages, archives by category, OG/Twitter card metadata.
+- **Default theme** — keep iterating: pagination, tags, author pages, archives by category, OG/Twitter card metadata.
 
 Smaller items still on the list:
 
