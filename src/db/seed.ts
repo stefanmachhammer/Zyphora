@@ -33,7 +33,13 @@ const displayName = process.env.SEED_ADMIN_NAME ?? 'Admin';
 
 const admin = await createAdminUser({ email, password, displayName });
 if (admin.created) {
-  console.log(`Admin user created: ${email} / ${password}`);
+  // Never echo the password itself — it may come from SEED_ADMIN_PASSWORD and
+  // CI/deploy logs are routinely retained and shared (CWE-532). Naming the
+  // publicly documented default is fine; it's a constant, not the secret.
+  console.log(`Admin user created: ${email}`);
+  if (!process.env.SEED_ADMIN_PASSWORD) {
+    console.log('Password is the documented default (changeme123).');
+  }
   console.log('Change the password after first login.');
 } else {
   console.log(`User ${email} already exists — skipping.`);
