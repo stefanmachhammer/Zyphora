@@ -76,12 +76,14 @@ function stripHtml(s: string): string {
     // Drop every other tag.
     .replace(/<[^>]+>/g, '')
     // Decode the most common HTML entities so they round-trip as plain text.
+    // `&amp;` must be decoded LAST: doing it first turns e.g. `&amp;lt;` into
+    // `&lt;` and then a second pass into `<` — a double-unescape (CWE-116).
     .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'");
+    .replace(/&#39;/gi, "'")
+    .replace(/&amp;/gi, '&');
 }
 
 type CreateMeta = {
