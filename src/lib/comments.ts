@@ -18,6 +18,7 @@ import { db, schema } from '../db/client.ts';
 import { eq, and, asc, desc, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import DOMPurify from 'isomorphic-dompurify';
 import type { Comment } from '../db/schema.ts';
 
 /**
@@ -65,20 +66,29 @@ export type CommentFormInput = z.infer<typeof commentFormSchema>;
  * that, for example, `&lt;script&gt;` doesn't survive as encoded markup that
  * a browser might re-interpret if some future template mishandles it.
  *
+ * Tag removal is delegated to DOMPurify with an empty allowlist rather than
+ * regex passes — a single-pass regex can be tricked by nested/overlapping
+ * tags like `<scr<script>ipt>` into reassembling the very markup it removed
+ * (CWE-116; CodeQL js/incomplete-multi-character-sanitization). A real HTML
+ * parser has no such re-entry problem, and script/style contents are dropped
+ * wholesale by DOMPurify's defaults.
+ *
  * Comment text is rendered through Eta's autoEscape, so we don't need
  * sophisticated sanitization — the goal here is just to keep the *stored*
  * value plain text, not pseudo-HTML.
  */
 function stripHtml(s: string): string {
-  return s
-    // Drop script/style tag content entirely.
-    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
-    // Drop every other tag.
-    .replace(/<[^>]+>/g, '')
+  // Empty allowlist → every tag is removed, text content is kept (except
+  // script/style bodies). The result is HTML-encoded text.
+  const text = DOMPurify.sanitize(s, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
+  return text
     // Decode the most common HTML entities so they round-trip as plain text.
     // `&amp;` must be decoded LAST: doing it first turns e.g. `&amp;lt;` into
     // `&lt;` and then a second pass into `<` — a double-unescape (CWE-116).
+    // DOMPurify emits `&nbsp;` as the literal U+00A0 character, so normalize
+    // both spellings to a plain space.
     .replace(/&nbsp;/gi, ' ')
+    .replace(/\u00a0/g, ' ')
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
