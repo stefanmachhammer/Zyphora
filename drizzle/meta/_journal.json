@@ -1,61 +1,12 @@
 {
   "version": "7",
-  "dialect": "sqlite",
+  "dialect": "mysql",
   "entries": [
     {
       "idx": 0,
-      "version": "6",
-      "when": 1778278620128,
-      "tag": "0000_nebulous_paibok",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1778278620129,
-      "tag": "0001_themes",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1778345378555,
-      "tag": "0002_smiling_morbius",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1778409838159,
-      "tag": "0003_hesitant_mongu",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1778409900000,
-      "tag": "0004_futuristic_famine",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1778774981528,
-      "tag": "0005_fancy_miek",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1778776023766,
-      "tag": "0006_familiar_kulan_gath",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1779000000000,
-      "tag": "0007_subscriber_role",
+      "version": "5",
+      "when": 1779993032791,
+      "tag": "0000_supreme_shinobi_shaw",
       "breakpoints": true
     }
   ]

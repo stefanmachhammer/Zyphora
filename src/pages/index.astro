@@ -22,8 +22,7 @@ const posts = await db
   .from(schema.posts)
   .leftJoin(schema.users, eq(schema.users.id, schema.posts.authorId))
   .where(eq(schema.posts.status, 'published'))
-  .orderBy(desc(schema.posts.publishedAt))
-  .all();
+  .orderBy(desc(schema.posts.publishedAt));
 
 return await renderTheme({
   template: 'index',

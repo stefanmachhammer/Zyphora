@@ -1,1 +1,0 @@
-ALTER TABLE `posts` ADD `moderate_comments` integer;

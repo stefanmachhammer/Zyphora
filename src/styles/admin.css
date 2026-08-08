@@ -288,6 +288,45 @@ tr:hover td { background: var(--panel-alt); }
 .login-card h1 { margin: 0 0 6px; font-size: 1.4rem; }
 .login-card .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 0.9rem; }
 
+/* Installer — sized a touch wider than the login card so the DB form fits
+   comfortably without the host/port row wrapping. Reuses .field / .input /
+   .btn / .alert from the admin styles above. */
+.install-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 32px;
+  width: 100%;
+  max-width: 560px;
+}
+.install-card h1 { margin: 0 0 6px; font-size: 1.4rem; }
+.install-card .subtitle { color: var(--muted); margin-bottom: 20px; font-size: 0.9rem; }
+.install-steps {
+  display: flex;
+  gap: 18px;
+  margin-bottom: 24px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.install-step { display: flex; align-items: center; gap: 6px; }
+.install-step.done { color: var(--text); }
+.install-step.active { color: var(--accent); font-weight: 600; }
+.install-step .pill {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.install-step.done .pill { background: var(--accent); color: #fff; border-color: var(--accent); }
+.install-step.active .pill { border-color: var(--accent); color: var(--accent); }
+.install-row { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+.install-hint { color: var(--muted); font-size: 0.82rem; margin: -4px 0 14px; }
+
 .editor-wrapper { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); }
 .editor-toolbar { display: flex; gap: 4px; padding: 6px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .editor-toolbar button {

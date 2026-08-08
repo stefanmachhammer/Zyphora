@@ -39,7 +39,7 @@ The full quick-start, scripts table, env vars, and project layout live in the [R
 1. Fork and create a branch off `main`. Branch names like `feature/comments` or `fix/eta-tokenizer-comments` are fine — match the imperative mood of the commit you'll write.
 2. Keep the PR focused. One feature or one fix per PR.
 3. Write commit subjects in the imperative mood (`Add post categories…`, `Fix Eta parse error…`), under ~72 characters. Add a body only if the change isn't self-evident.
-4. Run `npm run astro -- check` before opening the PR. Type errors should be zero; the `await db.…` `ts(80007)` hints are intentional (see the data layer notes below).
+4. Run `npm run astro -- check` before opening the PR. Type errors should be zero.
 5. If you touched the schema, include the generated migration (`./drizzle/`) and verify it applies cleanly to a fresh DB.
 6. Update the README and any affected docs in the same PR. Don't leave docs for "later."
 
@@ -50,7 +50,7 @@ PR descriptions should answer: **what changed, why, and how to verify**. A bulle
 These aren't preferences — they're invariants other code relies on. Breaking them silently breaks unrelated things.
 
 - **Imports keep `.ts` / `.tsx` extensions.** The seed and migrate scripts run under `node --experimental-strip-types` and need them. Mixed style across the codebase becomes noise fast.
-- **`await db.…` is intentional.** Drizzle's better-sqlite3 driver is synchronous, so `astro check` flags the awaits as `ts(80007)` hints. Keep them — they're forward-compat for libsql / Postgres. Do not strip them.
+- **Drizzle queries are async.** With the `mysql2` driver, `await db.select()...where(...)` resolves to a row array — there is no `.get()` / `.all()`. For "first or undefined" reads, append `.limit(1)` and take `[0]`. Settings upsert uses `.onDuplicateKeyUpdate({ set: ... })`.
 - **Sanitize before storing rich HTML.** Anything that lands in `posts.contentHtml` (or any future field rendered with `<%~ %>` / `set:html`) goes through `sanitizeHtml()` in `src/lib/sanitize.ts` first. The public site renders post HTML raw, and that's only safe because of the on-write sanitization.
 - **Comment content is plain text.** No Markdown, no HTML — strip on input, escape on render.
 - **Slug uniqueness goes through `uniqueSlug()`** in `src/lib/posts.ts`. Don't write directly to `posts.slug`.

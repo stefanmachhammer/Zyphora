@@ -22,7 +22,7 @@ if (!canManageUsers(Astro.locals.user)) {
 // Roles are loaded from the DB so admin-defined custom roles show up in the
 // dropdown automatically. The Zod validators below build a tuple from this
 // list so submitted role slugs are constrained to existing rows.
-const roles = await db.select().from(schema.roles).orderBy(asc(schema.roles.system), asc(schema.roles.name)).all();
+const roles = await db.select().from(schema.roles).orderBy(asc(schema.roles.system), asc(schema.roles.name));
 const roleSlugs = roles.map((r) => r.slug) as [string, ...string[]];
 const roleSlugSchema = z.enum(roleSlugs);
 
@@ -88,8 +88,8 @@ if (Astro.request.method === 'POST') {
     if (!parsed.success) {
       error = parsed.error.issues[0]?.message ?? 'Invalid input.';
     } else {
-      const existing = await db.select().from(schema.users).where(eq(schema.users.email, parsed.data.email)).get();
-      if (existing) {
+      const existing = await db.select().from(schema.users).where(eq(schema.users.email, parsed.data.email)).limit(1);
+      if (existing.length > 0) {
         error = 'A user with that email already exists.';
       } else {
         await db.insert(schema.users).values({
@@ -105,7 +105,7 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-const users = await db.select().from(schema.users).orderBy(desc(schema.users.createdAt)).all();
+const users = await db.select().from(schema.users).orderBy(desc(schema.users.createdAt));
 ---
 <AdminLayout title="Users">
   <div class="toolbar">

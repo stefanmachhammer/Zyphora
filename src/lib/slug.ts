@@ -19,6 +19,6 @@ export function slugify(input: string): string {
     // escapes so the regex stays correct regardless of source-file encoding.
     .replace(/[\u0300-\u036f]/gu, '')
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || 'untitled';
+    .slice(0, 80)
+    .replace(/^-+|-+$/g, '') || 'untitled';
 }

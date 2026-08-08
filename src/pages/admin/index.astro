@@ -5,14 +5,25 @@
  */
 import AdminLayout from '../../layouts/AdminLayout.astro';
 import { db, schema } from '../../db/client.ts';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 
-const totalPosts = (await db.select().from(schema.posts).all()).length;
-const publishedPosts = (await db.select().from(schema.posts).where(eq(schema.posts.status, 'published')).all()).length;
-const totalUsers = (await db.select().from(schema.users).all()).length;
-const totalMedia = (await db.select().from(schema.media).all()).length;
+// Cheap counts via SELECT COUNT(*) — far less data over the wire than
+// pulling every row only to read .length. mysql2 may surface COUNT() as a
+// string when totals exceed JS's safe-integer range; Number() narrows it
+// back without losing precision at the magnitudes we expect here.
+const totalPostsRows = await db.select({ count: sql<number>`count(*)` }).from(schema.posts);
+const publishedPostsRows = await db
+  .select({ count: sql<number>`count(*)` })
+  .from(schema.posts)
+  .where(eq(schema.posts.status, 'published'));
+const totalUsersRows = await db.select({ count: sql<number>`count(*)` }).from(schema.users);
+const totalMediaRows = await db.select({ count: sql<number>`count(*)` }).from(schema.media);
+const totalPosts = Number(totalPostsRows[0]?.count ?? 0);
+const publishedPosts = Number(publishedPostsRows[0]?.count ?? 0);
+const totalUsers = Number(totalUsersRows[0]?.count ?? 0);
+const totalMedia = Number(totalMediaRows[0]?.count ?? 0);
 
-const recent = await db.select().from(schema.posts).orderBy(desc(schema.posts.updatedAt)).limit(5).all();
+const recent = await db.select().from(schema.posts).orderBy(desc(schema.posts.updatedAt)).limit(5);
 ---
 <AdminLayout title="Dashboard">
   <h1>Welcome back, {Astro.locals.user?.displayName}</h1>

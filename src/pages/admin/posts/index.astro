@@ -19,8 +19,7 @@ const rows = await db
   })
   .from(schema.posts)
   .leftJoin(schema.users, eq(schema.users.id, schema.posts.authorId))
-  .orderBy(desc(schema.posts.updatedAt))
-  .all();
+  .orderBy(desc(schema.posts.updatedAt));
 ---
 <AdminLayout title="Posts">
   <div class="toolbar">

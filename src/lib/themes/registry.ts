@@ -106,7 +106,8 @@ export async function syncThemes(): Promise<void> {
   const onDiskSlugs = new Set(onDisk.map((m) => m.slug));
 
   for (const m of onDisk) {
-    const existing = await db.select().from(schema.themes).where(eq(schema.themes.slug, m.slug)).get();
+    const existingRows = await db.select().from(schema.themes).where(eq(schema.themes.slug, m.slug)).limit(1);
+    const existing = existingRows[0];
     const bundled = m.slug === DEFAULT_THEME_SLUG;
     if (existing) {
       await db
@@ -131,7 +132,7 @@ export async function syncThemes(): Promise<void> {
     }
   }
 
-  const dbRows = await db.select().from(schema.themes).all();
+  const dbRows = await db.select().from(schema.themes);
   for (const row of dbRows) {
     if (!onDiskSlugs.has(row.slug)) {
       await db.delete(schema.themes).where(eq(schema.themes.slug, row.slug));
@@ -145,7 +146,7 @@ export async function syncThemes(): Promise<void> {
  */
 export async function listThemes(): Promise<ThemeRecord[]> {
   await syncThemes();
-  const rows = await db.select().from(schema.themes).all();
+  const rows = await db.select().from(schema.themes);
   const activeSlug = await getActiveThemeSlug();
   return rows.map((row) => ({
     slug: row.slug,

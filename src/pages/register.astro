@@ -75,8 +75,8 @@ if (Astro.request.method === 'POST') {
       .select({ id: schema.users.id })
       .from(schema.users)
       .where(eq(schema.users.email, parsed.data.email))
-      .get();
-    if (existing) {
+      .limit(1);
+    if (existing.length > 0) {
       // Email collision: same generic surface area as login — don't hint
       // whether the address is registered ("an account with this email exists"
       // is itself a probe vector). The duplicate is rejected, the user picks

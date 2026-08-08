@@ -13,7 +13,8 @@ export const POST: APIRoute = async (ctx) => {
   const { id } = ctx.params;
   if (!id) return ctx.redirect('/admin/posts');
 
-  const post = await db.select().from(schema.posts).where(eq(schema.posts.id, id)).get();
+  const postRows = await db.select().from(schema.posts).where(eq(schema.posts.id, id)).limit(1);
+  const post = postRows[0];
   if (!post) return ctx.redirect('/admin/posts');
 
   if (!canEditPost(ctx.locals.user, post)) {

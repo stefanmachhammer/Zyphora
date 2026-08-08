@@ -6,11 +6,11 @@
  * post title, excerpt, and content body. Drafts are never searched — same
  * rule as every other public route here.
  *
- * Why LIKE instead of FTS5: SQLite's full-text engine is great, but it needs
- * a separate virtual table + triggers to stay in sync with `posts`. For the
- * size of an indie CMS that's overkill. We can swap in FTS later by replacing
- * just this route — the theme contract (a list of `posts` + `search.query`)
- * stays the same.
+ * Why LIKE instead of full-text: MySQL's `FULLTEXT` index would be a real win
+ * at scale, but it needs a separate index declaration and a different query
+ * shape. For the size of an indie CMS LIKE is fine; we can swap to FULLTEXT
+ * later by editing only this route — the theme contract (a list of `posts`
+ * plus `search.query`) stays the same.
  */
 import { db, schema } from '../db/client.ts';
 import { and, eq, or, like, desc } from 'drizzle-orm';
@@ -30,10 +30,11 @@ let posts: Array<{
 }> = [];
 
 if (query.length > 0) {
-  // SQLite's LIKE is case-insensitive for ASCII by default. Strip the wildcard
-  // characters from the user's query (rather than configuring an ESCAPE clause)
-  // so a search for "50%" can't accidentally match every post — and so we
-  // don't have to plumb a raw SQL fragment through drizzle's `like` helper.
+  // MySQL's LIKE is case-insensitive when the column collation is `_ci`
+  // (the default for utf8mb4 in MySQL 8). Strip the wildcard characters from
+  // the user's query (rather than configuring an ESCAPE clause) so a search
+  // for "50%" can't accidentally match every post — and so we don't have to
+  // plumb a raw SQL fragment through drizzle's `like` helper.
   const sanitized = query.replace(/[%_]/g, '');
   if (sanitized.length === 0) {
     // The query was entirely wildcards; treat as empty rather than match-all.
@@ -66,8 +67,7 @@ if (query.length > 0) {
         ),
       ),
     )
-    .orderBy(desc(schema.posts.publishedAt))
-    .all();
+    .orderBy(desc(schema.posts.publishedAt));
 }
 
 return await renderTheme({

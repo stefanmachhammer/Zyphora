@@ -15,7 +15,7 @@
  * trash so a misclick never destroys data unrecoverably.
  */
 import { db, schema } from '../db/client.ts';
-import { eq, asc, desc, sql } from 'drizzle-orm';
+import { eq, and, asc, desc, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Comment } from '../db/schema.ts';
@@ -129,12 +129,11 @@ export async function createComment(
  * comment-thread reading order (and matches WordPress's default).
  */
 export async function getApprovedComments(postId: string): Promise<Comment[]> {
-  return db
+  return await db
     .select()
     .from(schema.comments)
-    .where(sql`${schema.comments.postId} = ${postId} AND ${schema.comments.status} = 'approved'`)
-    .orderBy(asc(schema.comments.createdAt))
-    .all();
+    .where(and(eq(schema.comments.postId, postId), eq(schema.comments.status, 'approved')))
+    .orderBy(asc(schema.comments.createdAt));
 }
 
 /** Row shape returned by the moderation listing — comment + post title for context. */
@@ -172,7 +171,7 @@ export async function getCommentsByStatus(
     ? baseQuery.where(eq(schema.comments.status, status)).orderBy(desc(schema.comments.createdAt))
     : baseQuery.orderBy(desc(schema.comments.createdAt));
 
-  return ordered.all();
+  return await ordered;
 }
 
 /**
@@ -193,8 +192,7 @@ export async function getCommentCounts(): Promise<{
       count: sql<number>`count(*)`.as('count'),
     })
     .from(schema.comments)
-    .groupBy(schema.comments.status)
-    .all();
+    .groupBy(schema.comments.status);
 
   const out = { pending: 0, approved: 0, spam: 0, trash: 0 };
   for (const r of rows) {

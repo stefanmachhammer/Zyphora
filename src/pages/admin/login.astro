@@ -32,7 +32,8 @@ if (Astro.request.method === 'POST') {
     // Fetch the user and verify the password. Use a single generic error
     // message for both "no such user" and "wrong password" so attackers
     // can't probe for valid emails.
-    const user = await db.select().from(schema.users).where(eq(schema.users.email, email)).get();
+    const rows = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1);
+    const user = rows[0];
     if (!user || !(await verifyPassword(user.passwordHash, password))) {
       error = 'Invalid email or password.';
     } else {

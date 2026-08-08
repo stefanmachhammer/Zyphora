@@ -16,7 +16,8 @@ import { sanitizeHtml } from '../lib/sanitize.ts';
 
 const adminEmail = process.env.SEED_ADMIN_EMAIL ?? 'admin@zyphora.local';
 
-const author = await db.select().from(schema.users).where(eq(schema.users.email, adminEmail)).get();
+const authorRows = await db.select().from(schema.users).where(eq(schema.users.email, adminEmail)).limit(1);
+const author = authorRows[0];
 if (!author) {
   console.error(`No user found for ${adminEmail}. Run \`npm run db:seed\` first.`);
   process.exit(1);
@@ -30,9 +31,9 @@ type DemoPost = { title: string; excerpt: string; contentHtml: string; daysAgo: 
 const demoPosts: DemoPost[] = [
   {
     title: 'Welcome to Zyphora',
-    excerpt: 'A self-hosted, WordPress-style CMS built on Astro — fast SSR, SQLite, and a tiny admin you can actually understand.',
+    excerpt: 'A self-hosted, WordPress-style CMS built on Astro — fast SSR, MySQL, and a tiny admin you can actually understand.',
     contentHtml: `
-      <p>Zyphora is a small, opinionated content engine. Posts are written in a TipTap editor, stored in SQLite, sanitized server-side, and rendered through swappable Eta themes.</p>
+      <p>Zyphora is a small, opinionated content engine. Posts are written in a TipTap editor, stored in MySQL, sanitized server-side, and rendered through swappable Eta themes.</p>
       <h2>What ships in the box</h2>
       <ul>
         <li>Server-rendered public site with cookie-session auth for the admin.</li>
@@ -82,11 +83,11 @@ const demoPosts: DemoPost[] = [
     category: 'gadgets',
   },
   {
-    title: 'Why SQLite, and when to leave it',
-    excerpt: 'Single-node deployments, WAL mode, and the migration path the day you outgrow one box.',
+    title: 'Why MySQL, and how to scale it',
+    excerpt: 'A familiar workhorse database, utf8mb4 throughout, and what changes when you need more than one application node.',
     contentHtml: `
-      <p>SQLite is the default for a reason: one file, no daemon, instant cold start, and easy backups. WAL mode is on, foreign keys are enforced, and Drizzle's better-sqlite3 driver is synchronous — fast and predictable.</p>
-      <p>The day you need horizontal scaling, two things have to change: sessions move out of SQLite (Redis is the obvious next step), and the database itself shifts to Postgres or libsql. The schema is portable; the awaits scattered around the data layer are intentional, exactly so that swap doesn't require a rewrite.</p>
+      <p>MySQL is the workhorse here: a familiar daemon, predictable operational tooling, and utf8mb4 everywhere so titles and content can carry emoji and non-BMP characters without a fight.</p>
+      <p>The day you need horizontal scaling, the application's session table needs to move out — Redis is the obvious next step — but the database itself happily accepts more reader replicas without a schema change. The data layer is fully async, so swapping in a serverless MySQL driver later is a one-file change in <code>db/client.ts</code>.</p>
     `,
     daysAgo: 14,
     category: 'reviews',
@@ -122,8 +123,8 @@ for (const post of demoPosts) {
   // Slug is the idempotency key — if it already exists, skip silently.
   // We deliberately don't update existing rows, because re-running shouldn't
   // clobber edits a user has made to seeded content.
-  const existing = await db.select({ id: schema.posts.id }).from(schema.posts).where(eq(schema.posts.slug, slug)).get();
-  if (existing) {
+  const existing = await db.select({ id: schema.posts.id }).from(schema.posts).where(eq(schema.posts.slug, slug)).limit(1);
+  if (existing.length > 0) {
     skipped += 1;
     continue;
   }
@@ -151,11 +152,12 @@ let recategorized = 0;
 for (const post of demoPosts) {
   if (post.category === 'news') continue;
   const slug = slugify(post.title);
-  const row = await db
+  const rows = await db
     .select({ id: schema.posts.id, category: schema.posts.category })
     .from(schema.posts)
     .where(eq(schema.posts.slug, slug))
-    .get();
+    .limit(1);
+  const row = rows[0];
   if (!row || row.category !== 'news') continue;
   await db.update(schema.posts).set({ category: post.category }).where(eq(schema.posts.id, row.id));
   recategorized += 1;

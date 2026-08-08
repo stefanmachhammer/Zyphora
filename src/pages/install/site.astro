@@ -1,0 +1,163 @@
+---
+/**
+ * Installer step 2 — site title + admin account.
+ *
+ * Preconditions checked on every request:
+ *   • DB is configured (otherwise bounce back to step 1).
+ *
+ * On POST we run, in sequence:
+ *   1. Apply pending migrations (idempotent — re-running is safe).
+ *   2. Seed the four system roles.
+ *   3. Create the bootstrap admin user with the operator's chosen
+ *      email/password/display name (Argon2-hashed).
+ *   4. Persist the site title + description.
+ *   5. Mint a session for the new admin and set the cookie so they land
+ *      directly in `/admin` already logged in — no separate "go log in"
+ *      step.
+ *   6. Flip the install-complete latch so `/install/*` immediately 404s.
+ *
+ * The migration and seed steps run on every POST (not just the first) so
+ * a partial install — say, migrations applied but the form re-rendered
+ * because the admin password was too short — converges to a working state
+ * on retry rather than leaving the operator stuck.
+ */
+import '../../styles/admin.css';
+import { getInstallState, markInstalled } from '../../lib/install.ts';
+import {
+  runMigrations,
+  seedSystemRoles,
+  seedSiteSettings,
+  createAdminUser,
+} from '../../lib/install-ops.ts';
+import { createSession, setSessionCookie } from '../../lib/auth.ts';
+
+const theme = Astro.cookies.get('zyphora_theme')?.value === 'dark' ? 'dark' : 'light';
+
+// Front-door guard: if DB credentials aren't usable, send the operator
+// back to step 1 — running migrations against a broken pool would just
+// throw a less helpful error.
+const state = await getInstallState();
+if (state === 'no-db-config') return Astro.redirect('/install/database');
+if (state === 'installed') return Astro.redirect('/admin');
+
+let error: string | null = null;
+let siteTitle = 'My Zyphora Site';
+let siteDescription = 'A site powered by Zyphora';
+let adminEmail = '';
+let adminName = 'Admin';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  siteTitle = String(form.get('site_title') ?? '').trim() || siteTitle;
+  siteDescription = String(form.get('site_description') ?? '').trim() || siteDescription;
+  adminEmail = String(form.get('admin_email') ?? '').trim().toLowerCase();
+  adminName = String(form.get('admin_name') ?? '').trim() || 'Admin';
+  const adminPassword = String(form.get('admin_password') ?? '');
+  const adminPasswordConfirm = String(form.get('admin_password_confirm') ?? '');
+
+  // Validate before touching the DB. Email shape check is intentionally
+  // loose — we just want "user@host" with no whitespace; full RFC 5322
+  // validation has too many edge cases for a setup wizard.
+  if (!adminEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) {
+    error = 'Enter a valid email address for the admin account.';
+  } else if (adminPassword.length < 8) {
+    error = 'Admin password must be at least 8 characters.';
+  } else if (adminPassword !== adminPasswordConfirm) {
+    error = 'Password confirmation does not match.';
+  } else {
+    try {
+      // Re-run migrations every POST. The drizzle-kit bookkeeping table
+      // makes this a no-op once they're applied, so the cost is one
+      // SELECT against `__drizzle_migrations`.
+      await runMigrations();
+      await seedSystemRoles();
+
+      const admin = await createAdminUser({
+        email: adminEmail,
+        password: adminPassword,
+        displayName: adminName,
+      });
+      if (!admin.created) {
+        // An account with this email already exists — most likely from a
+        // previous incomplete install attempt. We don't trust the
+        // password the operator just typed against that old hash; ask
+        // them to either log in or change the email.
+        error =
+          'An account with that email already exists. Use a different email, or go to the login page if this account is already yours.';
+      } else {
+        await seedSiteSettings({ title: siteTitle, description: siteDescription });
+
+        // Auto-login. The operator just proved they control the install
+        // (they're the one with shell/network access to this server), so
+        // it would be hostile to ask them to log in immediately after.
+        const session = await createSession(admin.id);
+        setSessionCookie(Astro, session.id, session.expiresAt);
+
+        markInstalled();
+        return Astro.redirect('/admin');
+      }
+    } catch (err) {
+      // Surface the underlying error so an operator looking at a strange
+      // failure (permission denied, disk full, schema drift, etc.) can
+      // see it without tailing logs.
+      error = err instanceof Error ? err.message : 'Installation failed. Check the server logs.';
+    }
+  }
+}
+---
+<!doctype html>
+<html lang="en" data-theme={theme}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <title>Install Zyphora · Admin account</title>
+  </head>
+  <body class="login-page">
+    <form method="POST" class="install-card" autocomplete="off">
+      <h1>Almost there</h1>
+      <p class="subtitle">Name your site and create the first admin account.</p>
+
+      <div class="install-steps">
+        <span class="install-step done"><span class="pill">✓</span>Database</span>
+        <span class="install-step active"><span class="pill">2</span>Admin</span>
+      </div>
+
+      {error && <div class="alert error">{error}</div>}
+
+      <div class="field">
+        <label for="site_title">Site title</label>
+        <input class="input" id="site_title" name="site_title" type="text" value={siteTitle} required autofocus />
+      </div>
+
+      <div class="field">
+        <label for="site_description">Site description</label>
+        <input class="input" id="site_description" name="site_description" type="text" value={siteDescription} />
+      </div>
+
+      <div class="field">
+        <label for="admin_name">Your name</label>
+        <input class="input" id="admin_name" name="admin_name" type="text" value={adminName} required />
+      </div>
+
+      <div class="field">
+        <label for="admin_email">Admin email</label>
+        <input class="input" id="admin_email" name="admin_email" type="email" value={adminEmail} required autocomplete="username" />
+      </div>
+
+      <div class="install-row">
+        <div class="field">
+          <label for="admin_password">Password</label>
+          <input class="input" id="admin_password" name="admin_password" type="password" minlength="8" required autocomplete="new-password" />
+        </div>
+        <div class="field">
+          <label for="admin_password_confirm">Confirm</label>
+          <input class="input" id="admin_password_confirm" name="admin_password_confirm" type="password" minlength="8" required autocomplete="new-password" />
+        </div>
+      </div>
+      <p class="install-hint">At least 8 characters. You can change it later from your profile.</p>
+
+      <button class="btn" type="submit" style="width:100%">Install Zyphora</button>
+    </form>
+  </body>
+</html>

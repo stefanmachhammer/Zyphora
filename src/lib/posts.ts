@@ -54,8 +54,8 @@ async function uniqueSlug(base: string, excludeId?: string): Promise<string> {
       .select({ id: schema.posts.id })
       .from(schema.posts)
       .where(excludeId ? and(eq(schema.posts.slug, slug), ne(schema.posts.id, excludeId)) : eq(schema.posts.slug, slug))
-      .get();
-    if (!existing) return slug;
+      .limit(1);
+    if (existing.length === 0) return slug;
     n += 1;
     slug = `${base}-${n}`;
   }

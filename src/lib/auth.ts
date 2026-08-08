@@ -100,7 +100,7 @@ export async function deleteSession(id: string) {
  * permission set instead of failing the lookup outright.
  */
 export async function getUserBySession(sessionId: string): Promise<SessionUser | null> {
-  const row = await db
+  const rows = await db
     .select({
       user: schema.users,
       session: schema.sessions,
@@ -110,8 +110,9 @@ export async function getUserBySession(sessionId: string): Promise<SessionUser |
     .innerJoin(schema.users, eq(schema.users.id, schema.sessions.userId))
     .leftJoin(schema.roles, eq(schema.roles.slug, schema.users.role))
     .where(eq(schema.sessions.id, sessionId))
-    .get();
+    .limit(1);
 
+  const row = rows[0];
   if (!row) return null;
   if (row.session.expiresAt.getTime() < Date.now()) {
     await deleteSession(sessionId);

@@ -49,7 +49,8 @@ if (Astro.request.method === 'POST') {
   if (!email || !password) {
     authForm.error = 'Email and password are required.';
   } else {
-    const user = await db.select().from(schema.users).where(eq(schema.users.email, email)).get();
+    const rows = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1);
+    const user = rows[0];
     if (!user || !(await verifyPassword(user.passwordHash, password))) {
       // One generic message for both branches — see top-of-file comment.
       authForm.error = 'Invalid email or password.';

@@ -1,1 +1,0 @@
-ALTER TABLE `posts` ADD `category` text DEFAULT 'news' NOT NULL;

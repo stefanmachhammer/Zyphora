@@ -25,7 +25,8 @@ if (Astro.request.method === 'POST') {
     // it's swallowed (best-effort), so we don't end up with a row pointing
     // at nothing — the row still gets removed below.
     const id = String(form.get('id') ?? '');
-    const item = await db.select().from(schema.media).where(eq(schema.media.id, id)).get();
+    const itemRows = await db.select().from(schema.media).where(eq(schema.media.id, id)).limit(1);
+    const item = itemRows[0];
     if (item) {
       await deleteUpload(item.filename);
       await db.delete(schema.media).where(eq(schema.media.id, id));
@@ -58,7 +59,7 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-const items = await db.select().from(schema.media).orderBy(desc(schema.media.createdAt)).all();
+const items = await db.select().from(schema.media).orderBy(desc(schema.media.createdAt));
 
 const formatSize = (b: number) => {
   if (b < 1024) return `${b} B`;

@@ -28,7 +28,7 @@ export async function getActiveThemeSlug(): Promise<string> {
  * present) so we never end up in a state where the active theme can't render.
  */
 export async function setActiveTheme(slug: string): Promise<void> {
-  const exists = await db.select().from(schema.themes).where(eq(schema.themes.slug, slug)).get();
-  if (!exists) throw new Error(`Theme not installed: ${slug}`);
+  const rows = await db.select().from(schema.themes).where(eq(schema.themes.slug, slug)).limit(1);
+  if (rows.length === 0) throw new Error(`Theme not installed: ${slug}`);
   await setSetting(ACTIVE_THEME_KEY, slug);
 }

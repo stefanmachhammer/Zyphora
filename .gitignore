@@ -23,13 +23,12 @@ pnpm-debug.log*
 # jetbrains setting folder
 .idea/
 
-# data and uploads
-data/
+# uploads
 public/uploads/
 
 # user-installed themes (the bundled `default` theme is tracked)
 themes/*
 !themes/default/
 
-# drizzle journal sqlite-only artifacts can stay tracked; uncomment if migration noise is unwanted
+# drizzle migration SQL stays tracked; uncomment if you want it ignored
 # drizzle/

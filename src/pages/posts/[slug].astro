@@ -32,7 +32,7 @@ if (!slug) {
 
 // Fetch the post first — we need its id to attach a comment to, and we want
 // to 404 the same way regardless of GET or POST.
-const row = await db
+const rows = await db
   .select({
     id: schema.posts.id,
     slug: schema.posts.slug,
@@ -47,8 +47,9 @@ const row = await db
   .from(schema.posts)
   .leftJoin(schema.users, eq(schema.users.id, schema.posts.authorId))
   .where(and(eq(schema.posts.slug, slug), eq(schema.posts.status, 'published')))
-  .get();
+  .limit(1);
 
+const row = rows[0];
 if (!row) {
   return await renderTheme({
     template: 'notFound',

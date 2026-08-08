@@ -42,8 +42,8 @@ if (Astro.request.method === 'POST') {
     error = parsed.error.issues[0]?.message ?? 'Invalid input.';
   } else {
     const slug = slugify(parsed.data.slug || parsed.data.name);
-    const existing = await db.select().from(schema.roles).where(eq(schema.roles.slug, slug)).get();
-    if (existing) {
+    const existing = await db.select().from(schema.roles).where(eq(schema.roles.slug, slug)).limit(1);
+    if (existing.length > 0) {
       error = `A role with slug "${slug}" already exists.`;
     } else {
       await db.insert(schema.roles).values({
@@ -67,15 +67,14 @@ if (Astro.url.searchParams.get('deleted')) {
   success = 'Role deleted.';
 }
 
-const roles = await db.select().from(schema.roles).orderBy(asc(schema.roles.system), asc(schema.roles.name)).all();
+const roles = await db.select().from(schema.roles).orderBy(asc(schema.roles.system), asc(schema.roles.name));
 
 // Count users per role so the list can show usage and the per-role page can
 // block deletion when the role is in use. Single grouped query rather than
 // N+1 — drizzle's groupBy returns the slug + count.
 const usageRows = await db
   .select({ role: schema.users.role })
-  .from(schema.users)
-  .all();
+  .from(schema.users);
 const usageByRole = new Map<string, number>();
 for (const row of usageRows) {
   usageByRole.set(row.role, (usageByRole.get(row.role) ?? 0) + 1);

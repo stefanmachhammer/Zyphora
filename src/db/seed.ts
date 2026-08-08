@@ -1,49 +1,52 @@
 /**
- * First-run seed script.
+ * First-run seed script — CLI entry point for `npm run db:seed`.
  *
- * Idempotent — re-running on an already-seeded DB only logs and exits.
+ * Delegates to the helpers in `src/lib/install-ops.ts` so the web installer
+ * at `/install` can run the same logic without spawning a child process.
+ * Idempotent — re-running on an already-seeded DB is safe.
+ *
+ * Three things get seeded on a fresh DB:
+ *   1. The four system roles (admin/editor/author/subscriber).
+ *   2. The bootstrap admin user (credentials below).
+ *   3. Default site title + description (only when missing — a customized
+ *      title set via the admin UI is preserved across re-runs).
+ *
  * Reads admin credentials from env (`SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`,
  * `SEED_ADMIN_NAME`) so production deploys can avoid the well-known defaults.
+ * Operators who'd rather run the web installer can ignore this script entirely
+ * — it exists for headless/scripted deploys.
  */
-import { db, schema } from './client.ts';
-import { hash } from '@node-rs/argon2';
-import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import {
+  seedSystemRoles,
+  createAdminUser,
+  seedSiteSettingsIfMissing,
+} from '../lib/install-ops.ts';
 
-// Resolve seed credentials. Defaults are fine for local dev but should be
-// overridden via env in any non-throwaway deployment.
+const insertedRoleSlugs = await seedSystemRoles();
+if (insertedRoleSlugs.length > 0) {
+  console.log(`Seeded ${insertedRoleSlugs.length} system role(s): ${insertedRoleSlugs.join(', ')}`);
+}
+
 const email = process.env.SEED_ADMIN_EMAIL ?? 'admin@zyphora.local';
 const password = process.env.SEED_ADMIN_PASSWORD ?? 'changeme123';
 const displayName = process.env.SEED_ADMIN_NAME ?? 'Admin';
 
-// Create the bootstrap admin only if no user with this email exists yet.
-// Re-running the script on an already-seeded DB is a no-op.
-const existing = await db.select().from(schema.users).where(eq(schema.users.email, email)).get();
-if (existing) {
-  console.log(`User ${email} already exists — skipping.`);
-} else {
-  const passwordHash = await hash(password);
-  await db.insert(schema.users).values({
-    id: randomUUID(),
-    email,
-    passwordHash,
-    displayName,
-    role: 'admin',
-  });
+const admin = await createAdminUser({ email, password, displayName });
+if (admin.created) {
   console.log(`Admin user created: ${email} / ${password}`);
   console.log('Change the password after first login.');
+} else {
+  console.log(`User ${email} already exists — skipping.`);
 }
 
-// Insert default site settings on first run. Presence of `site_title` is the
-// sentinel for whether settings have been seeded.
-const siteTitle = await db.select().from(schema.settings).where(eq(schema.settings.key, 'site_title')).get();
-if (!siteTitle) {
-  await db.insert(schema.settings).values([
-    { key: 'site_title', value: 'Zyphora' },
-    { key: 'site_description', value: 'A site powered by Zyphora' },
-  ]);
+const seededSettings = await seedSiteSettingsIfMissing({
+  title: 'Zyphora',
+  description: 'A site powered by Zyphora',
+});
+if (seededSettings) {
   console.log('Default settings created.');
 }
 
-// Explicit exit — better-sqlite3 keeps the process alive otherwise.
+// Explicit exit — the mysql2 pool keeps the event loop alive otherwise
+// (idle connections waiting to be reused).
 process.exit(0);

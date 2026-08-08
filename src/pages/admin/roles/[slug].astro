@@ -27,7 +27,8 @@ if (!canManageRoles(Astro.locals.user)) {
 }
 
 const slug = Astro.params.slug ?? '';
-const role = await db.select().from(schema.roles).where(eq(schema.roles.slug, slug)).get();
+const roleRows = await db.select().from(schema.roles).where(eq(schema.roles.slug, slug)).limit(1);
+const role = roleRows[0];
 if (!role) {
   return new Response('Not Found', { status: 404 });
 }
@@ -35,8 +36,7 @@ if (!role) {
 const usersWithRole = await db
   .select({ id: schema.users.id })
   .from(schema.users)
-  .where(eq(schema.users.role, slug))
-  .all();
+  .where(eq(schema.users.role, slug));
 const userCount = usersWithRole.length;
 
 const updateSchema = z.object({
