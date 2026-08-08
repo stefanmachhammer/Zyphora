@@ -1,17 +1,19 @@
 ---
 /**
- * Media library — upload + delete. Two-action POST endpoint (`_action`
- * defaults to upload).
- *
- * Storage details (size limits, MIME allowlist, on-disk layout) live in
- * `src/lib/media.ts` so swapping to a remote store later only touches one
- * file, not this page.
+ * Media library — upload + delete. Storage details (limits, MIME allowlist,
+ * on-disk layout) live in src/lib/media.ts.
  */
 import AdminLayout from '../../layouts/AdminLayout.astro';
 import { db, schema } from '../../db/client.ts';
 import { desc, eq } from 'drizzle-orm';
 import { saveUpload, deleteUpload, publicUrl } from '../../lib/media.ts';
+import { canManageMedia } from '../../lib/auth.ts';
 import { randomUUID } from 'node:crypto';
+
+// Requires manage_media: uploads accept SVG (script-carrying), a stored-XSS surface.
+if (!canManageMedia(Astro.locals.user)) {
+  return new Response('Forbidden', { status: 403 });
+}
 
 let error: string | null = null;
 let success: string | null = null;
@@ -21,9 +23,7 @@ if (Astro.request.method === 'POST') {
   const action = String(form.get('_action') ?? 'upload');
 
   if (action === 'delete') {
-    // Delete: remove the bytes first, then the row. If the file delete fails
-    // it's swallowed (best-effort), so we don't end up with a row pointing
-    // at nothing — the row still gets removed below.
+    // Delete bytes first (best-effort), then the row.
     const id = String(form.get('id') ?? '');
     const itemRows = await db.select().from(schema.media).where(eq(schema.media.id, id)).limit(1);
     const item = itemRows[0];
@@ -33,8 +33,7 @@ if (Astro.request.method === 'POST') {
       success = 'File deleted.';
     }
   } else {
-    // Upload: validate the form field is a real file, hand it off to
-    // saveUpload (which enforces size + MIME limits), and persist metadata.
+    // Upload: saveUpload enforces size + MIME limits, then persist metadata.
     const file = form.get('file');
     if (!(file instanceof File) || file.size === 0) {
       error = 'Please choose a file.';
@@ -51,8 +50,7 @@ if (Astro.request.method === 'POST') {
         });
         success = 'Uploaded.';
       } catch (e) {
-        // saveUpload throws a human-readable error for size/MIME violations;
-        // surface those directly so the user can fix and retry.
+        // saveUpload throws human-readable size/MIME errors — surface them.
         error = e instanceof Error ? e.message : 'Upload failed.';
       }
     }

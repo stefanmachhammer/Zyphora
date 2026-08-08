@@ -1,9 +1,7 @@
 ---
 /**
- * Role management — list + create. Editing and deletion live on the per-role
- * page (`./[slug].astro`). Gated by `manage_roles`; the seeded admin role
- * ships with that permission. System roles (admin/editor/author) are listed
- * but flagged as locked — the per-role page refuses to mutate them.
+ * Role management — list + create (edit/delete live in ./[slug].astro).
+ * Requires manage_roles. System roles are listed but locked from mutation.
  */
 import AdminLayout from '../../../layouts/AdminLayout.astro';
 import { db, schema } from '../../../db/client.ts';
@@ -23,7 +21,7 @@ if (!canManageRoles(Astro.locals.user)) {
 
 const createSchema = z.object({
   name: z.string().trim().min(1).max(50),
-  // Slug is optional; if omitted we derive it from the name.
+  // Optional slug; derived from the name when omitted.
   slug: z.string().trim().max(32).optional(),
   permissions: z.array(z.enum(PERMISSION_KEYS)).default([]),
 });
@@ -69,9 +67,7 @@ if (Astro.url.searchParams.get('deleted')) {
 
 const roles = await db.select().from(schema.roles).orderBy(asc(schema.roles.system), asc(schema.roles.name));
 
-// Count users per role so the list can show usage and the per-role page can
-// block deletion when the role is in use. Single grouped query rather than
-// N+1 — drizzle's groupBy returns the slug + count.
+// Count users per role for the usage column.
 const usageRows = await db
   .select({ role: schema.users.role })
   .from(schema.users);

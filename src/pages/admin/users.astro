@@ -1,13 +1,8 @@
 ---
 /**
- * User management — admin-only. Three actions multiplexed by `_action`:
- * create, delete, update_role. Two self-protection rules enforced here:
- *   - You cannot delete your own account (would orphan an admin login).
- *   - You cannot demote yourself out of `admin` (would lock you out of
- *     this very page on the next request).
- *
- * Both rules are enforced server-side; the UI just hides the relevant
- * controls on your own row to keep the experience honest.
+ * User management — requires manage_users. Actions: create, delete, update_role.
+ * Self-protection (server-side): you can't delete your own account or demote
+ * yourself out of manage_users and lock yourself out of this page.
  */
 import AdminLayout from '../../layouts/AdminLayout.astro';
 import { db, schema } from '../../db/client.ts';
@@ -19,9 +14,8 @@ if (!canManageUsers(Astro.locals.user)) {
   return new Response('Forbidden', { status: 403 });
 }
 
-// Roles are loaded from the DB so admin-defined custom roles show up in the
-// dropdown automatically. The Zod validators below build a tuple from this
-// list so submitted role slugs are constrained to existing rows.
+// Roles loaded from DB (so custom roles appear); the Zod tuple below constrains
+// submitted slugs to existing rows.
 const roles = await db.select().from(schema.roles).orderBy(asc(schema.roles.system), asc(schema.roles.name));
 const roleSlugs = roles.map((r) => r.slug) as [string, ...string[]];
 const roleSlugSchema = z.enum(roleSlugs);
@@ -46,8 +40,7 @@ if (Astro.request.method === 'POST') {
   const action = String(form.get('_action') ?? 'create');
 
   if (action === 'delete') {
-    // Delete: refuse to drop your own row. Cascading session-row delete is
-    // handled by the FK in schema.ts — no separate cleanup needed.
+    // Refuse to drop your own row. Session rows cascade via the FK in schema.ts.
     const id = String(form.get('id') ?? '');
     if (id === Astro.locals.user!.id) {
       error = 'You cannot delete your own account.';
@@ -56,10 +49,8 @@ if (Astro.request.method === 'POST') {
       success = 'User deleted.';
     }
   } else if (action === 'update_role') {
-    // Role change: validate input shape, then block self-demotion so the
-    // admin can't accidentally lock themselves out of this page. The check
-    // is against the `manage_users` permission rather than a literal role
-    // name, so it stays correct even when admins define custom roles.
+    // Block self-demotion out of manage_users. Checked against the permission,
+    // not a literal role name, so it holds for custom roles too.
     const parsed = updateRoleSchema.safeParse({
       id: form.get('id'),
       role: form.get('role'),
@@ -77,8 +68,7 @@ if (Astro.request.method === 'POST') {
       }
     }
   } else {
-    // Create: validate the form, reject duplicate emails up-front (the
-    // unique index would catch it, but explicit check gives a nicer error).
+    // Create: explicit duplicate-email check for a nicer error than the unique index.
     const parsed = userFormSchema.safeParse({
       email: form.get('email'),
       displayName: form.get('displayName'),

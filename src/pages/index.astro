@@ -1,10 +1,6 @@
 ---
 /**
- * Homepage — list of published posts.
- *
- * This route is intentionally thin: fetch the data, hand it to the theme
- * renderer, and return whatever Response the active theme produces. The
- * markup lives entirely in the theme's `index.eta` template.
+ * Homepage — fetch published posts and render via the active theme's `index.eta`.
  */
 import { db, schema } from '../db/client.ts';
 import { eq, desc } from 'drizzle-orm';

@@ -7,10 +7,9 @@
  *   - Actions run side effects: `doAction('post_rendered', ctx)` —
  *     each registered action runs in priority order; return values are ignored.
  *
- * Why this lives in core (not in uploaded themes): we deliberately do NOT
- * dynamically import JavaScript shipped inside an uploaded theme zip. That
- * would be remote-code-execution-by-design. Hooks are wired by the core, and
- * a future plugin loader (with its own threat model) can register more.
+ * Hooks are wired by core only — we never dynamically import JS from uploaded
+ * theme zips (that would be RCE-by-design). A future plugin loader can register
+ * more, under its own threat model.
  */
 
 type FilterFn<T> = (value: T, ctx?: unknown) => T | Promise<T>;
@@ -21,10 +20,7 @@ type Registration<F> = { fn: F; priority: number };
 const filters = new Map<string, Registration<FilterFn<unknown>>[]>();
 const actions = new Map<string, Registration<ActionFn>[]>();
 
-/**
- * Register a filter. Lower priorities run first (matches WordPress).
- * The default priority of 10 also matches WordPress so muscle memory carries.
- */
+/** Register a filter. Lower priorities run first (WordPress semantics). */
 export function addFilter<T>(name: string, fn: FilterFn<T>, priority = 10): void {
   const list = filters.get(name) ?? [];
   list.push({ fn: fn as FilterFn<unknown>, priority });
@@ -32,10 +28,7 @@ export function addFilter<T>(name: string, fn: FilterFn<T>, priority = 10): void
   filters.set(name, list);
 }
 
-/**
- * Run every registered filter for `name` against `value` in priority order
- * and return the final result. Returns `value` unchanged if no filters match.
- */
+/** Run every filter for `name` over `value` in priority order; returns the result. */
 export async function applyFilters<T>(name: string, value: T, ctx?: unknown): Promise<T> {
   const list = filters.get(name);
   if (!list || list.length === 0) return value;

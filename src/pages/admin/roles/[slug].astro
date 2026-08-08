@@ -1,15 +1,8 @@
 ---
 /**
- * Per-role edit + delete page.
- *
- * System roles (admin/editor/author) are rendered read-only — both the form
- * and the delete button refuse to mutate them. This is the safety net that
- * prevents an admin from removing `manage_roles` from their own role and
- * locking everyone out of the CMS.
- *
- * Deletion is also blocked when any user is still assigned to the role:
- * the UI disables the button and the POST handler refuses, telling the
- * admin to reassign users first.
+ * Per-role edit + delete. System roles are read-only (safety net against
+ * removing manage_roles and locking everyone out). Deletion is also blocked
+ * while any user is still assigned to the role.
  */
 import AdminLayout from '../../../layouts/AdminLayout.astro';
 import { db, schema } from '../../../db/client.ts';

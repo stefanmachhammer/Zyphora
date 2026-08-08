@@ -1,20 +1,11 @@
 /**
- * First-run seed script — CLI entry point for `npm run db:seed`.
+ * First-run seed — CLI entry point for `npm run db:seed`. Seeds system roles,
+ * the bootstrap admin, and default site settings.
  *
- * Delegates to the helpers in `src/lib/install-ops.ts` so the web installer
- * at `/install` can run the same logic without spawning a child process.
- * Idempotent — re-running on an already-seeded DB is safe.
- *
- * Three things get seeded on a fresh DB:
- *   1. The four system roles (admin/editor/author/subscriber).
- *   2. The bootstrap admin user (credentials below).
- *   3. Default site title + description (only when missing — a customized
- *      title set via the admin UI is preserved across re-runs).
- *
- * Reads admin credentials from env (`SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`,
- * `SEED_ADMIN_NAME`) so production deploys can avoid the well-known defaults.
- * Operators who'd rather run the web installer can ignore this script entirely
- * — it exists for headless/scripted deploys.
+ * Idempotent (safe to re-run). Shares its logic with the web installer via
+ * `src/lib/install-ops.ts`. Admin credentials come from env
+ * (`SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`, `SEED_ADMIN_NAME`) so production
+ * deploys can avoid the well-known defaults.
  */
 import {
   seedSystemRoles,
@@ -33,9 +24,8 @@ const displayName = process.env.SEED_ADMIN_NAME ?? 'Admin';
 
 const admin = await createAdminUser({ email, password, displayName });
 if (admin.created) {
-  // Never echo the password itself — it may come from SEED_ADMIN_PASSWORD and
-  // CI/deploy logs are routinely retained and shared (CWE-532). Naming the
-  // publicly documented default is fine; it's a constant, not the secret.
+  // Never echo the password — it may come from SEED_ADMIN_PASSWORD and deploy
+  // logs are retained/shared (CWE-532). Naming the documented default is fine.
   console.log(`Admin user created: ${email}`);
   if (!process.env.SEED_ADMIN_PASSWORD) {
     console.log('Password is the documented default (changeme123).');
@@ -53,6 +43,5 @@ if (seededSettings) {
   console.log('Default settings created.');
 }
 
-// Explicit exit — the mysql2 pool keeps the event loop alive otherwise
-// (idle connections waiting to be reused).
+// Explicit exit — the mysql2 pool keeps the event loop alive otherwise.
 process.exit(0);

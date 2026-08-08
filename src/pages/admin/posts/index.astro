@@ -1,12 +1,17 @@
 ---
 /**
- * Posts list — every post (drafts + published), most recently updated first.
- * Editorial gatekeeping happens on individual edit/delete actions, not here:
- * authors *see* every post but can only edit their own.
+ * Posts list — every post (drafts + published), newest-updated first.
+ * Edit/delete gating is per-row on the edit page: authors see all, edit own.
  */
 import AdminLayout from '../../../layouts/AdminLayout.astro';
 import { db, schema } from '../../../db/client.ts';
 import { desc, eq } from 'drizzle-orm';
+import { canCreatePost } from '../../../lib/auth.ts';
+
+// Requires post rights — the list exposes draft titles/slugs/authorship.
+if (!canCreatePost(Astro.locals.user)) {
+  return new Response('Forbidden', { status: 403 });
+}
 
 const rows = await db
   .select({

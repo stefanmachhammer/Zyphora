@@ -1,7 +1,6 @@
 /**
- * Delete-post endpoint — POST-only so a stray GET (prefetch, accidental
- * navigation) can't destroy data. Reuses `canEditPost` so authors can only
- * delete posts they could also edit.
+ * Delete-post endpoint — POST-only so a stray GET can't destroy data.
+ * Reuses canEditPost: authors can only delete posts they could edit.
  */
 import type { APIRoute } from 'astro';
 import { db, schema } from '../../../../db/client.ts';

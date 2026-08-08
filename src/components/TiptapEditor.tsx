@@ -1,15 +1,11 @@
 /**
- * Rich-text editor — the only React island in the project.
+ * Rich-text editor — the only React island. Mounted `client:only="react"`
+ * (no SSR); the current HTML is mirrored into a hidden `<input name={name}>`
+ * so the surrounding form POST carries it as a normal field.
  *
- * Mounted with `client:only="react"` (no SSR) on the post edit pages. The
- * current HTML is mirrored into a hidden `<input name={name}>` so the
- * surrounding `<form>` POST sends it as a normal form field — no JS
- * fetch/json wiring needed.
- *
- * Output HTML is sanitized server-side in `src/lib/posts.ts` before storage,
- * so anything the toolbar can produce here is safe to render later. If you
- * extend the toolbar, make sure DOMPurify's allowlist in `src/lib/sanitize.ts`
- * already covers the new tag — otherwise it will silently strip on save.
+ * Output is sanitized server-side in `src/lib/posts.ts` before storage. If you
+ * extend the toolbar, add the new tag to DOMPurify's allowlist in
+ * `src/lib/sanitize.ts` — otherwise it is silently stripped on save.
  */
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';

@@ -1,25 +1,12 @@
 ---
 /**
- * Installer step 2 — site title + admin account.
+ * Installer step 2 — site title + admin account. Requires DB configured
+ * (otherwise bounces to step 1).
  *
- * Preconditions checked on every request:
- *   • DB is configured (otherwise bounce back to step 1).
- *
- * On POST we run, in sequence:
- *   1. Apply pending migrations (idempotent — re-running is safe).
- *   2. Seed the four system roles.
- *   3. Create the bootstrap admin user with the operator's chosen
- *      email/password/display name (Argon2-hashed).
- *   4. Persist the site title + description.
- *   5. Mint a session for the new admin and set the cookie so they land
- *      directly in `/admin` already logged in — no separate "go log in"
- *      step.
- *   6. Flip the install-complete latch so `/install/*` immediately 404s.
- *
- * The migration and seed steps run on every POST (not just the first) so
- * a partial install — say, migrations applied but the form re-rendered
- * because the admin password was too short — converges to a working state
- * on retry rather than leaving the operator stuck.
+ * On POST, in sequence: migrate, seed roles, create the Argon2-hashed admin,
+ * persist site settings, mint the admin's session, and flip the install-complete
+ * latch (so `/install/*` 404s). Migrate and seed run on every POST — all idempotent —
+ * so a partial install converges to a working state on retry.
  */
 import '../../styles/admin.css';
 import { getInstallState, markInstalled } from '../../lib/install.ts';
@@ -33,9 +20,8 @@ import { createSession, setSessionCookie } from '../../lib/auth.ts';
 
 const theme = Astro.cookies.get('zyphora_theme')?.value === 'dark' ? 'dark' : 'light';
 
-// Front-door guard: if DB credentials aren't usable, send the operator
-// back to step 1 — running migrations against a broken pool would just
-// throw a less helpful error.
+// Guard: without usable DB credentials, bounce to step 1 (migrating against a
+// broken pool would only throw a less helpful error).
 const state = await getInstallState();
 if (state === 'no-db-config') return Astro.redirect('/install/database');
 if (state === 'installed') return Astro.redirect('/admin');
@@ -55,9 +41,8 @@ if (Astro.request.method === 'POST') {
   const adminPassword = String(form.get('admin_password') ?? '');
   const adminPasswordConfirm = String(form.get('admin_password_confirm') ?? '');
 
-  // Validate before touching the DB. Email shape check is intentionally
-  // loose — we just want "user@host" with no whitespace; full RFC 5322
-  // validation has too many edge cases for a setup wizard.
+  // Validate before touching the DB. Email check is deliberately loose (just
+  // "user@host", no whitespace) — full RFC 5322 is overkill for a setup wizard.
   if (!adminEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) {
     error = 'Enter a valid email address for the admin account.';
   } else if (adminPassword.length < 8) {
@@ -66,9 +51,7 @@ if (Astro.request.method === 'POST') {
     error = 'Password confirmation does not match.';
   } else {
     try {
-      // Re-run migrations every POST. The drizzle-kit bookkeeping table
-      // makes this a no-op once they're applied, so the cost is one
-      // SELECT against `__drizzle_migrations`.
+      // No-op once applied (drizzle-kit tracks state in `__drizzle_migrations`).
       await runMigrations();
       await seedSystemRoles();
 
@@ -78,18 +61,15 @@ if (Astro.request.method === 'POST') {
         displayName: adminName,
       });
       if (!admin.created) {
-        // An account with this email already exists — most likely from a
-        // previous incomplete install attempt. We don't trust the
-        // password the operator just typed against that old hash; ask
-        // them to either log in or change the email.
+        // Email already exists (likely a prior incomplete install). We won't
+        // validate the typed password against that old hash — ask them to log in
+        // or pick another email.
         error =
           'An account with that email already exists. Use a different email, or go to the login page if this account is already yours.';
       } else {
         await seedSiteSettings({ title: siteTitle, description: siteDescription });
 
-        // Auto-login. The operator just proved they control the install
-        // (they're the one with shell/network access to this server), so
-        // it would be hostile to ask them to log in immediately after.
+        // Auto-login — the operator already controls this server.
         const session = await createSession(admin.id);
         setSessionCookie(Astro, session.id, session.expiresAt);
 
@@ -97,9 +77,7 @@ if (Astro.request.method === 'POST') {
         return Astro.redirect('/admin');
       }
     } catch (err) {
-      // Surface the underlying error so an operator looking at a strange
-      // failure (permission denied, disk full, schema drift, etc.) can
-      // see it without tailing logs.
+      // Surface the underlying error inline so the operator needn't tail logs.
       error = err instanceof Error ? err.message : 'Installation failed. Check the server logs.';
     }
   }

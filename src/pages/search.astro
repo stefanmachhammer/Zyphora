@@ -1,23 +1,14 @@
 ---
 /**
- * Search results route.
- *
- * Reads `q` from the query string and runs a case-insensitive LIKE across the
- * post title, excerpt, and content body. Drafts are never searched — same
- * rule as every other public route here.
- *
- * Why LIKE instead of full-text: MySQL's `FULLTEXT` index would be a real win
- * at scale, but it needs a separate index declaration and a different query
- * shape. For the size of an indie CMS LIKE is fine; we can swap to FULLTEXT
- * later by editing only this route — the theme contract (a list of `posts`
- * plus `search.query`) stays the same.
+ * Search results — case-insensitive LIKE across post title, excerpt, and content
+ * (published only; drafts are never searched). LIKE over FULLTEXT is deliberate:
+ * fine at indie-CMS scale, and swappable later without changing the theme contract.
  */
 import { db, schema } from '../db/client.ts';
 import { and, eq, or, like, desc } from 'drizzle-orm';
 import { renderTheme } from '../lib/themes/render.ts';
 
-// Trim + cap the query so a giant string can't blow up the LIKE pattern.
-// Empty queries are valid — we render the empty-state with no results.
+// Cap length so a giant string can't blow up the LIKE pattern. Empty is valid.
 const rawQuery = Astro.url.searchParams.get('q') ?? '';
 const query = rawQuery.trim().slice(0, 100);
 
@@ -30,14 +21,12 @@ let posts: Array<{
 }> = [];
 
 if (query.length > 0) {
-  // MySQL's LIKE is case-insensitive when the column collation is `_ci`
-  // (the default for utf8mb4 in MySQL 8). Strip the wildcard characters from
-  // the user's query (rather than configuring an ESCAPE clause) so a search
-  // for "50%" can't accidentally match every post — and so we don't have to
-  // plumb a raw SQL fragment through drizzle's `like` helper.
+  // Strip LIKE wildcards so a search for "50%" can't match every post (simpler
+  // than plumbing an ESCAPE clause through drizzle's `like` helper). LIKE is
+  // case-insensitive under the default utf8mb4 `_ci` collation in MySQL 8.
   const sanitized = query.replace(/[%_]/g, '');
   if (sanitized.length === 0) {
-    // The query was entirely wildcards; treat as empty rather than match-all.
+    // Query was entirely wildcards; treat as empty rather than match-all.
     return await renderTheme({
       template: 'search',
       pathname: Astro.url.pathname,

@@ -1,107 +1,119 @@
 /**
- * Install-state detection — the single source of truth for "is this CMS
- * ready to serve traffic, or does it need to walk a fresh operator through
- * the web installer?"
+ * Install-state detection — the source of truth for "is this CMS ready to
+ * serve, or does it need the web installer?"
  *
- * Returned states, from least-installed to most-installed:
+ * States, least- to most-installed:
+ *   'no-db-config'  — DB_* env vars missing, or the DB is unreachable / wrong
+ *                     credentials. Installer collects DB credentials.
+ *   'no-tables'     — DB reachable but schema not applied (no `users` table).
+ *                     Installer auto-runs migrations.
+ *   'no-admin'      — Schema present but no admin user. Installer collects
+ *                     site title + admin account.
+ *   'installed'     — Set up; installer 404s so nobody can re-run it.
  *
- *   'no-db-config'  — Required DB_* env vars are missing or the DB
- *                     they point at is unreachable / wrong credentials.
- *                     Installer step: collect DB credentials.
- *   'no-tables'     — DB reachable but the schema hasn't been applied yet
- *                     (the `users` table doesn't exist). Installer should
- *                     auto-run migrations and proceed to the next step.
- *   'no-admin'      — Schema is in place but no admin user exists yet.
- *                     Installer step: collect site title + admin account.
- *   'installed'     — Everything's set up; the installer should 404 to
- *                     prevent a stray visitor from re-running it.
- *
- * Caching: once we observe `'installed'`, we cache that forever (per
- * process). The other states are *not* cached — they represent partially-
- * set-up systems where the operator might be actively progressing through
- * the wizard, and each request should observe the latest reality. The
- * 'installed' fast path makes the gate in middleware effectively free for
- * the steady-state.
+ * Only 'installed' is cached (per process) — the partial states represent an
+ * operator mid-wizard, so each request re-checks. The fast path makes the
+ * middleware gate effectively free in steady state.
  */
-import { sql } from 'drizzle-orm';
+import { sql, inArray } from 'drizzle-orm';
 import { db, schema, isDbConfigured } from '../db/client.ts';
-import { eq } from 'drizzle-orm';
+import { writeEnvVars } from './env-file.ts';
 
 export type InstallState = 'no-db-config' | 'no-tables' | 'no-admin' | 'installed';
 
-// Sticky once true. The installer flips it explicitly via `markInstalled()`
-// the moment it creates the bootstrap admin, so the next request through
-// middleware can short-circuit without re-querying the DB.
+// Durable "installed" marker written to `.env`. Security-critical: without it,
+// a reboot while the DB is briefly unreachable would report `no-db-config` and
+// re-open the public installer — letting a passer-by repoint the CMS at their
+// own database or mint a fresh admin. Once set, the gate treats the CMS as
+// installed regardless of DB reachability. Wiping `.env` is the reset escape hatch.
+const INSTALL_MARKER = 'ZYPHORA_INSTALLED';
+
+// In-process latch (lost on restart; backed by the durable marker above).
 let installedCache = false;
 
 /**
- * Resolve the current install state with at most two short queries — and
- * zero queries once the process has seen 'installed' even once.
+ * Resolve the current install state — at most two short queries, and zero once
+ * the process has seen 'installed'.
  */
 export async function getInstallState(): Promise<InstallState> {
-  if (installedCache) return 'installed';
+  if (installedCache || process.env[INSTALL_MARKER] === '1') {
+    installedCache = true;
+    return 'installed';
+  }
   if (!isDbConfigured()) return 'no-db-config';
 
-  // Step 1: can we talk to MySQL at all?
+  // Can we talk to MySQL at all? Any failure → back to step 1; the installer's
+  // own `testConnection` gives a precise error when the operator re-submits.
   try {
     await db.execute(sql`SELECT 1`);
   } catch {
-    // Connection refused, access denied, unknown database — treat them all
-    // as "config is wrong, send the user back to step 1." We deliberately
-    // don't try to discriminate the specific failure here: the installer's
-    // own connection-test surface (`testConnection`) gives the operator a
-    // precise error message when they re-submit the form.
     return 'no-db-config';
   }
 
-  // Step 2: has the schema been applied? The `users` table is the
-  // earliest-needed object — without it nothing else works.
+  // "Administrator" is defined by capability (any role granting `manage_users`),
+  // not the literal `admin` slug — else renaming the admin role would report
+  // "no admin" and re-open the public installer. `users` is the earliest schema
+  // object, so a missing-table error here doubles as "schema not applied".
   let adminCount: number;
   try {
-    const rows = await db
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(eq(schema.users.role, 'admin'))
-      .limit(1);
-    adminCount = rows.length;
+    const adminRoles = await db
+      .select({ slug: schema.roles.slug, permissions: schema.roles.permissions })
+      .from(schema.roles);
+    const adminRoleSlugs = adminRoles
+      .filter((r) => Array.isArray(r.permissions) && r.permissions.includes('manage_users'))
+      .map((r) => r.slug);
+
+    if (adminRoleSlugs.length === 0) {
+      adminCount = 0;
+    } else {
+      const rows = await db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(inArray(schema.users.role, adminRoleSlugs))
+        .limit(1);
+      adminCount = rows.length;
+    }
   } catch (err) {
-    // The mysql2 error for a missing table is ER_NO_SUCH_TABLE (code 1146).
-    // Any other failure here is unexpected and we still want the operator
-    // to see the installer rather than a stack trace, so we fall through to
-    // the same "no-tables" branch and let the migration step re-test.
+    // Missing table (ER_NO_SUCH_TABLE / 1146) → schema not applied. Any other
+    // failure also falls through to 'no-tables' so the operator sees the
+    // installer, not a stack trace, and the migration step re-tests.
     if (isMissingTableError(err)) return 'no-tables';
     return 'no-tables';
   }
 
   if (adminCount === 0) return 'no-admin';
 
-  installedCache = true;
+  markInstalled();
   return 'installed';
 }
 
 /**
- * Flip the install-complete latch. Called by the installer the instant the
- * admin user is created so subsequent requests skip the DB probe entirely.
+ * Flip the install-complete latch and persist the durable marker, so later
+ * requests — and restarts — skip the DB probe and can't re-open the wizard.
+ * Persisting is best-effort: a read-only `.env` keeps only the in-process latch
+ * (falls back to the DB probe after a restart), so a hardened deploy still installs.
  */
 export function markInstalled(): void {
+  if (installedCache && process.env[INSTALL_MARKER] === '1') return;
   installedCache = true;
+  if (process.env[INSTALL_MARKER] === '1') return;
+  process.env[INSTALL_MARKER] = '1';
+  try {
+    writeEnvVars({ [INSTALL_MARKER]: '1' });
+  } catch {
+    // .env not writable — keep the in-memory latch (see above).
+  }
 }
 
 /**
- * Drop the cached "installed" verdict. Used by the installer when it
- * reloads the DB pool after writing new credentials — the cached verdict
- * (if any) was about a different database and might be stale.
+ * Drop the cached "installed" verdict. Used by the installer after it reloads
+ * the DB pool against new credentials — the old verdict was about a different DB.
  */
 export function resetInstallStateCache(): void {
   installedCache = false;
 }
 
-/**
- * Recognize MySQL's "table doesn't exist" error across the small variations
- * mysql2 emits (numeric `errno` 1146, string `code` 'ER_NO_SUCH_TABLE').
- * Pulled into its own helper so the recognition rule lives in one place if
- * future drivers report it differently.
- */
+/** Recognize MySQL's "table doesn't exist" error (code ER_NO_SUCH_TABLE / errno 1146). */
 function isMissingTableError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const e = err as { code?: unknown; errno?: unknown };

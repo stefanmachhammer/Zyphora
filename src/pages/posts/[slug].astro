@@ -1,16 +1,11 @@
 ---
 /**
- * Single-post route. Looks up the post by slug (published only — drafts are
- * never publicly visible) and renders via the active theme's `post.eta`.
+ * Single-post route (published only — drafts are never publicly visible),
+ * rendered via the active theme's `post.eta`. 404s render through the theme too.
  *
- * 404s render through the theme too so the look stays consistent on miss.
- *
- * Comments: this route also handles guest comment submissions. POSTs validate
- * via `commentFormSchema`, insert through `createComment` (which strips HTML
- * and lands the row as `pending`), then redirect with `?comment=pending#comments`
- * so a refresh doesn't re-submit. On validation failure we re-render the same
- * page with the user's previous values + per-field errors via `commentForm`
- * in the render context.
+ * Also handles guest comment submissions: POST validates, inserts, and redirects
+ * (PRG) so a refresh doesn't re-submit; on failure re-renders with sticky values
+ * and per-field errors.
  */
 import { db, schema } from '../../db/client.ts';
 import { eq, and } from 'drizzle-orm';
@@ -30,8 +25,8 @@ if (!slug) {
   });
 }
 
-// Fetch the post first — we need its id to attach a comment to, and we want
-// to 404 the same way regardless of GET or POST.
+// Fetch the post first — its id is needed to attach a comment, and we 404
+// identically for GET and POST.
 const rows = await db
   .select({
     id: schema.posts.id,
@@ -61,9 +56,8 @@ if (!row) {
 
 let commentForm: CommentFormState | undefined;
 
-// Hard-stop any comment submission when the author has disabled comments on
-// this post. The form is hidden in the template too, but a stale tab (or a
-// scripted POST) shouldn't be able to bypass the toggle.
+// Enforce the comments-disabled toggle server-side — a stale tab or scripted
+// POST shouldn't bypass it even though the template also hides the form.
 if (Astro.request.method === 'POST' && !row.commentsEnabled) {
   return new Response('Comments are disabled for this post.', {
     status: 403,
@@ -82,8 +76,7 @@ if (Astro.request.method === 'POST') {
   };
   const parsed = commentFormSchema.safeParse(raw);
 
-  // Build the sticky-form payload up-front so both validation and reCAPTCHA
-  // failure paths can share the same shape.
+  // Shared by both the validation- and reCAPTCHA-failure paths.
   const stickyValues = {
     authorName: raw.authorName,
     authorEmail: raw.authorEmail,
@@ -92,14 +85,10 @@ if (Astro.request.method === 'POST') {
   };
 
   if (parsed.success) {
-    // reCAPTCHA gate runs only after schema validation passes — we don't want
-    // to burn a verify-token round-trip on requests that would have failed
-    // validation anyway. When the admin hasn't configured keys, `enabled` is
-    // false and we skip the verify entirely (opt-in spam protection).
+    // reCAPTCHA runs only after schema validation passes, and only when the
+    // admin has configured keys (opt-in spam protection).
     const recaptcha = await getRecaptchaConfig();
     if (recaptcha.enabled) {
-      // The widget injects this hidden field into the form on success; an
-      // unsolved checkbox (or a bot scripting the POST) leaves it empty.
       const token = String(form.get('g-recaptcha-response') ?? '');
       const ok = await verifyRecaptchaToken(token, recaptcha.secretKey!, Astro.clientAddress);
       if (!ok) {
@@ -111,8 +100,7 @@ if (Astro.request.method === 'POST') {
     }
 
     if (!commentForm) {
-      // Resolve the effective moderation policy: the per-post override wins
-      // when set, otherwise fall back to the site-wide setting (default on).
+      // Per-post moderation override wins; otherwise the site-wide setting (default on).
       const siteRequiresModeration = (await getSetting('require_comment_moderation', '1')) === '1';
       const moderate = row.moderateComments ?? siteRequiresModeration;
       const { status } = await createComment(parsed.data, {
@@ -120,13 +108,11 @@ if (Astro.request.method === 'POST') {
         userAgent: Astro.request.headers.get('user-agent') ?? undefined,
         initialStatus: moderate ? 'pending' : 'approved',
       });
-      // Redirect after successful POST so a refresh doesn't double-submit.
-      // Banner text branches on whether the comment was auto-approved.
+      // PRG; status drives the banner ("up" vs "awaiting moderation").
       return Astro.redirect(`/posts/${row.slug}?comment=${status}#comments`);
     }
   } else {
-    // Re-render the page with the user's previous values and a field-keyed
-    // error map so the template can highlight the offending fields.
+    // Project Zod issues into a field-keyed error map (first message per field wins).
     const errors: Record<string, string> = {};
     for (const issue of parsed.error.issues) {
       const key = String(issue.path[0] ?? '_');
@@ -136,11 +122,8 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-// Skip the fetch entirely when comments are disabled — disabling hides both
-// the form and any previously approved comments, so there's nothing to render.
+// Disabling comments hides both the form and previously approved comments.
 const comments = row.commentsEnabled ? await getApprovedComments(row.id) : [];
-// The post-submit redirect carries the final status so the template can pick
-// between "thanks, your comment is up" and "thanks, awaiting moderation."
 const commentSubmittedParam = Astro.url.searchParams.get('comment');
 const commentSubmitted: 'pending' | 'approved' | null =
   commentSubmittedParam === 'pending' || commentSubmittedParam === 'approved' ? commentSubmittedParam : null;
@@ -149,8 +132,7 @@ const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const formatComment = (s: string) => escapeHtml(s).replace(/\r?\n/g, '<br>');
 
-// Strip the internal `id` from the post payload exposed to the template —
-// theme templates don't need it and shouldn't grow a dependency on it.
+// Keep the internal `id` out of the template payload.
 const { id: _postId, ...publicPost } = row;
 
 return await renderTheme({

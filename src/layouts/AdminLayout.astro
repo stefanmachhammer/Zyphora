@@ -3,15 +3,11 @@
 /**
  * Admin shell — sidebar + main content slot. Wraps every page under `/admin`.
  *
- * The sidebar toggles between "full" and "rail" modes; the choice persists in
- * a non-HTTP cookie (`zyphora_sidebar`) so the rendered HTML matches the
- * user's last preference on first paint and there's no flash of width change.
- *
- * The "Users" link is admin-only — middleware blocks the underlying page for
- * non-admins anyway, but hiding the link keeps the UI honest.
+ * Nav links are permission-filtered for UI honesty only; each page enforces
+ * the same permission server-side — that is the actual access control.
  */
 import '../styles/admin.css';
-import { canManageUsers, canManageRoles, canModerateComments } from '../lib/auth.ts';
+import { canManageUsers, canManageRoles, canModerateComments, canManageMedia, canManageThemes } from '../lib/auth.ts';
 import { getCommentCounts } from '../lib/comments.ts';
 import { VERSION } from '../lib/version.ts';
 const { user } = Astro.locals;
@@ -19,13 +15,11 @@ const { title = 'Admin' } = Astro.props as { title?: string };
 const path = Astro.url.pathname;
 const isActive = (p: string) => path === p || path.startsWith(p + '/');
 const sidebarMode = Astro.cookies.get('zyphora_sidebar')?.value === 'rail' ? 'rail' : 'full';
-// Theme is read server-side so the rendered HTML matches the user's last choice
-// on first paint — no flash of light when reloading in dark mode.
+// Sidebar mode and theme are read server-side so first paint matches the
+// user's last choice — no flash of width or light on reload.
 const theme = Astro.cookies.get('zyphora_theme')?.value === 'dark' ? 'dark' : 'light';
 
-// Pending-comment count drives the sidebar badge. Only fetched for users
-// who can actually act on it — saves a query for plain authors and avoids
-// hinting at moderation surface area they can't reach anyway.
+// Only fetched for users who can moderate — saves a query for plain authors.
 const pendingComments = canModerateComments(user) ? (await getCommentCounts()).pending : 0;
 ---
 <!doctype html>
@@ -62,14 +56,18 @@ const pendingComments = canModerateComments(user) ? (await getCommentCounts()).p
             <span class="nav-label">Comments</span>
           </a>
         )}
-        <a href="/admin/media" class={isActive('/admin/media') ? 'active' : ''} title="Media">
-          <svg class="nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>
-          <span class="nav-label">Media</span>
-        </a>
-        <a href="/admin/themes" class={isActive('/admin/themes') ? 'active' : ''} title="Themes">
-          <svg class="nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 22a10 10 0 1 1 10-10c0 2.5-3 2-3 4s2 6-7 6z"/></svg>
-          <span class="nav-label">Themes</span>
-        </a>
+        {canManageMedia(user) && (
+          <a href="/admin/media" class={isActive('/admin/media') ? 'active' : ''} title="Media">
+            <svg class="nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>
+            <span class="nav-label">Media</span>
+          </a>
+        )}
+        {canManageThemes(user) && (
+          <a href="/admin/themes" class={isActive('/admin/themes') ? 'active' : ''} title="Themes">
+            <svg class="nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 22a10 10 0 1 1 10-10c0 2.5-3 2-3 4s2 6-7 6z"/></svg>
+            <span class="nav-label">Themes</span>
+          </a>
+        )}
         {canManageUsers(user) && (
           <a href="/admin/users" class={isActive('/admin/users') ? 'active' : ''} title="Users">
             <svg class="nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M15 20c0-2.5 2-4.5 4.5-4.5"/></svg>
@@ -131,10 +129,8 @@ const pendingComments = canModerateComments(user) ? (await getCommentCounts()).p
       <slot />
     </main>
     <script is:inline>
-      // Sidebar + theme toggles. Inlined (not React islands) because they touch
-      // a single attribute+cookie and we want them ready before any hydration
-      // runs — otherwise toggling would briefly flicker. Cookies are read by
-      // the server on next render so the chosen modes survive reloads.
+      // Sidebar + theme toggles. Inlined (not React islands) so they're ready
+      // before hydration; the cookies they set are read server-side on reload.
       (() => {
         const sidebarBtn = document.getElementById('sidebar-toggle');
         sidebarBtn && sidebarBtn.addEventListener('click', () => {

@@ -1,12 +1,8 @@
 ---
 /**
- * Edit-post form. Mirrors `new.astro`'s validation+restore pattern; on save
- * we PRG-redirect with `?saved=1` so the success banner survives a refresh
- * and the POST doesn't replay if the user hits back.
- *
- * Authorization: `canEditPost` enforces the per-role rule (admins/editors
- * can edit anyone's post; authors only their own). Without this gate, the
- * routing layer alone would let any logged-in author edit any post.
+ * Edit-post form. Mirrors new.astro's validation+restore; on save PRG-redirects
+ * with ?saved=1. canEditPost enforces the per-role rule (admins/editors edit
+ * anyone's post; authors only their own).
  */
 import AdminLayout from '../../../layouts/AdminLayout.astro';
 import TiptapEditor from '../../../components/TiptapEditor.tsx';
@@ -15,9 +11,8 @@ import { eq } from 'drizzle-orm';
 import { postFormSchema, updatePost } from '../../../lib/posts.ts';
 import { canEditPost } from '../../../lib/auth.ts';
 
-// Resolve the post and run the role check before doing anything else.
-// Missing id / missing post both bounce back to the list silently — we
-// don't want to leak whether a post exists to a user who couldn't edit it.
+// Resolve the post, then role-check. Missing id/post bounce to the list silently
+// so we don't leak a post's existence to someone who couldn't edit it.
 const { id } = Astro.params;
 if (!id) return Astro.redirect('/admin/posts');
 
@@ -31,9 +26,7 @@ if (!canEditPost(Astro.locals.user, post)) {
 
 let error: string | null = null;
 let success: string | null = null;
-// See new.astro for the same tri-state translation. Kept inline (and not
-// extracted to a helper) because the two pages have diverged before in small
-// ways and a shared module would force them back together.
+// Tri-state moderation translation — see new.astro. Kept inline on purpose.
 type ModerationChoice = 'default' | 'require' | 'auto';
 const moderationChoiceFromForm = (v: FormDataEntryValue | null): ModerationChoice => {
   const s = String(v ?? 'default');
@@ -55,11 +48,8 @@ let values = {
 if (Astro.url.searchParams.get('created') === '1') success = 'Post created.';
 
 if (Astro.request.method === 'POST') {
-  // Same validation flow as the new-post page; on error, restore the form
-  // with the user's typed values so they don't lose work.
   const form = await Astro.request.formData();
-  // Unchecked checkboxes are omitted from form data entirely — presence
-  // alone means checked.
+  // Unchecked checkbox is absent from form data, so presence == checked.
   const commentsEnabled = form.get('commentsEnabled') !== null;
   const moderationChoice = moderationChoiceFromForm(form.get('moderation'));
   const parsed = postFormSchema.safeParse({
@@ -87,8 +77,7 @@ if (Astro.request.method === 'POST') {
       moderation: moderationChoice,
     };
   } else {
-    // Pass the previous status + publishedAt so updatePost can preserve the
-    // original publish date when toggling between published states.
+    // Pass prior status + publishedAt so updatePost preserves the original publish date.
     await updatePost(id, parsed.data, post.status, post.publishedAt);
     return Astro.redirect(`/admin/posts/${id}?saved=1`);
   }

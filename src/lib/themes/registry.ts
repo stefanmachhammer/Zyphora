@@ -1,11 +1,9 @@
 /**
- * Theme registry — discovers themes on disk and keeps the DB row index in sync.
+ * Theme registry — discovers themes on disk and reconciles the DB row index.
  *
- * Themes are filesystem-first: the source of truth for what's installed is the
- * presence of a directory under `themes/<slug>/` containing a valid
- * `theme.json`. The DB row exists so we can query by slug efficiently and so
- * the admin UI can show install metadata; it's reconciled on startup and
- * after any install/uninstall.
+ * Filesystem-first: a theme is installed iff `themes/<slug>/theme.json` exists.
+ * The DB row is a queryable mirror (slug lookups, install metadata), reconciled
+ * on startup and after any install/uninstall.
  */
 
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
@@ -16,22 +14,16 @@ import { eq } from 'drizzle-orm';
 import type { ThemeManifest, ThemeRecord } from './types.ts';
 import { getActiveThemeSlug } from './active.ts';
 
-/**
- * Root directory for all themes. Lives outside `src/` so it isn't bundled by
- * Vite/Astro — themes are read at runtime, not at build time.
- */
+/** Root theme dir — outside `src/` so Vite/Astro doesn't bundle it (runtime read). */
 export const THEMES_DIR = join(process.cwd(), 'themes');
 
 /** The slug used when no theme is set or the configured one is missing. */
 export const DEFAULT_THEME_SLUG = 'default';
 
 /**
- * Manifest schema — strict validation here gives uploaders a clean error
- * message instead of a render-time crash later.
- *
- * Slug is restricted to lowercase alphanumeric + dashes because it ends up in
- * URLs (asset routes) and on disk (directory name); narrowing the alphabet
- * sidesteps both URL-encoding surprises and path-traversal worries.
+ * Manifest schema. Slug is restricted to lowercase alphanumeric + dashes: it
+ * lands in URLs and on disk, so the narrow alphabet sidesteps URL-encoding and
+ * path-traversal surprises. Strict validation surfaces a clean upload-time error.
  */
 const manifestSchema = z.object({
   slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, 'slug must be lowercase alphanumeric with dashes'),
@@ -48,10 +40,7 @@ const manifestSchema = z.object({
     .optional(),
 });
 
-/**
- * Read and validate `theme.json` for a single slug. Returns null if the dir
- * is missing or the manifest is invalid; callers can decide whether to warn.
- */
+/** Read and validate `theme.json` for a slug; null if missing or invalid. */
 export function readManifest(slug: string): ThemeManifest | null {
   const dir = join(THEMES_DIR, slug);
   const manifestPath = join(dir, 'theme.json');
@@ -61,8 +50,7 @@ export function readManifest(slug: string): ThemeManifest | null {
     const raw = JSON.parse(readFileSync(manifestPath, 'utf8'));
     const parsed = manifestSchema.safeParse(raw);
     if (!parsed.success) return null;
-    // The folder name wins over whatever the manifest claims — protects us
-    // against a manifest whose `slug` doesn't match the directory it lives in.
+    // Folder name wins over the manifest's `slug`, guarding against a mismatch.
     return { ...parsed.data, slug };
   } catch {
     return null;
@@ -70,13 +58,10 @@ export function readManifest(slug: string): ThemeManifest | null {
 }
 
 /**
- * Scan the themes directory and return one record per valid theme.
- * Skips entries that aren't directories or lack a usable manifest.
- *
- * Dot-prefixed directories (`.staging-…`, `.backup-…`) are skipped — the
- * theme installer uses those names while swapping an update into place, and
- * a scan that lands mid-update would otherwise register a phantom theme row
- * for the staging dir.
+ * Scan the themes dir, one record per valid theme. Skips non-directories and
+ * entries lacking a usable manifest. Dot-prefixed dirs are skipped too: the
+ * installer uses `.staging-…`/`.backup-…` while swapping an update in, and a
+ * mid-update scan would otherwise register a phantom row for the staging dir.
  */
 export function scanThemes(): ThemeManifest[] {
   if (!existsSync(THEMES_DIR)) return [];
@@ -93,13 +78,9 @@ export function scanThemes(): ThemeManifest[] {
 }
 
 /**
- * Reconcile the `themes` table with what's on disk.
- * - Insert rows for newly-discovered themes
- * - Update version/name/etc for themes whose manifest changed
- * - Remove rows whose directory has been deleted
- *
- * `bundled` marks themes that ship with the codebase (currently just `default`)
- * so the UI can prevent the user from deleting them.
+ * Reconcile the `themes` table with disk: insert new, update changed, delete
+ * removed. `bundled` marks codebase-shipped themes (just `default`) so the UI
+ * can block their deletion.
  */
 export async function syncThemes(): Promise<void> {
   const onDisk = scanThemes();
@@ -140,10 +121,7 @@ export async function syncThemes(): Promise<void> {
   }
 }
 
-/**
- * Return all installed themes for the admin UI — DB rows joined with the
- * active-theme flag and the absolute on-disk path.
- */
+/** All installed themes for the admin UI, with active flag and on-disk path. */
 export async function listThemes(): Promise<ThemeRecord[]> {
   await syncThemes();
   const rows = await db.select().from(schema.themes);
@@ -162,9 +140,8 @@ export async function listThemes(): Promise<ThemeRecord[]> {
 }
 
 /**
- * Resolve the currently-active theme, falling back to `default` if the
- * configured one is missing on disk. Returns null only if even `default`
- * is gone (which would mean a broken install).
+ * Resolve the active theme, falling back to `default` if the configured one is
+ * missing. Null only if even `default` is gone (a broken install).
  */
 export async function resolveActiveTheme(): Promise<ThemeRecord | null> {
   const all = await listThemes();

@@ -1,17 +1,12 @@
 /**
  * Authentication primitives — password hashing, session lifecycle, cookie
- * helpers, and the small role-check predicates used by admin pages.
+ * helpers, and the role-check predicates used by admin pages.
  *
- * Session model: server-side opaque tokens stored in the `sessions` table.
- * Tokens are 24 random bytes (base64url), so collisions are not a concern.
- * Cookies are HttpOnly + SameSite=Lax + Secure-in-prod. Sessions are stored
- * in SQLite rather than as signed JWTs because that's simpler for a
- * single-node deploy; horizontally-scaled deploys would want to move sessions
- * to Redis or switch to a stateless token strategy first.
- *
- * Always go through these helpers when touching cookies — rolling your own
- * elsewhere risks drift in TTL / cookie attributes (HttpOnly, SameSite,
- * Secure-in-prod) and would silently weaken auth.
+ * Sessions are server-side opaque tokens (24 random bytes, base64url) in the
+ * `sessions` MySQL table rather than signed JWTs — simpler for a single-node
+ * deploy; scaling out would want Redis or a stateless token strategy first.
+ * Always go through the cookie helpers here so TTL and cookie attributes
+ * (HttpOnly, SameSite, Secure-in-prod) stay consistent.
  */
 import { db, schema } from '../db/client.ts';
 import { hash, verify } from '@node-rs/argon2';
@@ -21,11 +16,10 @@ import type { APIContext } from 'astro';
 import type { User } from '../db/schema.ts';
 
 /**
- * The full set of permission keys the CMS understands. Adding a new entry
- * here is the only place permissions are declared — `lib/auth.ts` checks
- * against these strings, the admin UI renders a checkbox per entry, and
- * `roles.permissions` stores any subset of them. Removing or renaming an
- * entry is a breaking change for stored role rows.
+ * The full set of permission keys the CMS understands — the single place
+ * permissions are declared. The admin UI renders a checkbox per entry and
+ * `roles.permissions` stores any subset. Renaming/removing an entry is a
+ * breaking change for stored role rows.
  */
 export const PERMISSION_KEYS = [
   'manage_users',
@@ -50,31 +44,28 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
 };
 
 /**
- * The user record as it lives on `Astro.locals.user`: the DB row plus the
- * resolved permission set. Middleware (via `getUserBySession`) joins the
- * user's role row once per request so downstream pages can check
- * `hasPermission(...)` without further queries.
+ * The user record on `Astro.locals.user`: the DB row plus its resolved
+ * permission set (joined once per request by `getUserBySession`, so pages can
+ * check `hasPermission(...)` without further queries).
  */
 export type SessionUser = User & { permissions: ReadonlySet<string> };
 
 export const SESSION_COOKIE = 'zyphora_session';
-// 30 days. Matches typical "remember me" defaults; expired sessions are
-// purged lazily by `getUserBySession` so a fresh login always gets a clean TTL.
+// 30 days; expired sessions are purged lazily by `getUserBySession`.
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 
-/** Hash a plaintext password with Argon2id (default parameters from @node-rs/argon2). */
 export async function hashPassword(password: string): Promise<string> {
   return hash(password);
 }
 
-/** Verify a plaintext password against a stored Argon2 hash. Constant-time. */
+/** Constant-time verify against a stored Argon2 hash. */
 export async function verifyPassword(passwordHash: string, password: string): Promise<boolean> {
   return verify(passwordHash, password);
 }
 
 /**
- * Create a new session for `userId` and return the opaque token + its expiry.
- * The caller is responsible for setting the cookie via `setSessionCookie`.
+ * Create a session for `userId` and return the opaque token + expiry.
+ * Caller must set the cookie via `setSessionCookie`.
  */
 export async function createSession(userId: string) {
   const id = randomBytes(24).toString('base64url');
@@ -83,21 +74,17 @@ export async function createSession(userId: string) {
   return { id, expiresAt };
 }
 
-/** Drop a single session row by id (used on logout and on stale lookups). */
+/** Drop a single session row by id (logout, stale lookups). */
 export async function deleteSession(id: string) {
   await db.delete(schema.sessions).where(eq(schema.sessions.id, id));
 }
 
 /**
- * Resolve a session token to its user. Returns null for unknown or expired
- * sessions; expired rows are deleted as a side effect so the table doesn't
- * grow forever even without a separate sweeper running.
+ * Resolve a session token to its user, or null if unknown/expired. Expired
+ * rows are deleted as a side effect (lazy cleanup, no separate sweeper).
  *
- * Joins the role row in the same query so the returned `SessionUser` carries
- * its resolved permission set — pages can then call `hasPermission` without
- * a follow-up DB hit. A left-join is used so a user whose role slug went
- * stale (role deleted out from under them) still resolves with an empty
- * permission set instead of failing the lookup outright.
+ * Left-joins the role row so a user whose role was deleted still resolves
+ * (with an empty permission set) instead of failing the lookup.
  */
 export async function getUserBySession(sessionId: string): Promise<SessionUser | null> {
   const rows = await db
@@ -123,9 +110,8 @@ export async function getUserBySession(sessionId: string): Promise<SessionUser |
 }
 
 /**
- * Bulk-delete expired sessions. Not wired to a schedule yet — `getUserBySession`
- * cleans up on access, which is enough for low traffic. Exported so a future
- * cron / startup hook can call it.
+ * Bulk-delete expired sessions. Not scheduled yet — `getUserBySession` cleans
+ * up on access; exported for a future cron / startup hook.
  */
 export async function purgeExpiredSessions() {
   await db.delete(schema.sessions).where(lt(schema.sessions.expiresAt, new Date()));
@@ -152,21 +138,40 @@ export function hasPermission(user: SessionUser | null, key: Permission): boolea
   return !!user && user.permissions.has(key);
 }
 
-/** Gate: the user can create/modify users. Backed by `manage_users`. */
 export function canManageUsers(user: SessionUser | null): boolean {
   return hasPermission(user, 'manage_users');
 }
 
-/** Gate: the user can create/modify custom roles. Backed by `manage_roles`. */
 export function canManageRoles(user: SessionUser | null): boolean {
   return hasPermission(user, 'manage_roles');
 }
 
+export function canManageMedia(user: SessionUser | null): boolean {
+  return hasPermission(user, 'manage_media');
+}
+
+export function canManageSettings(user: SessionUser | null): boolean {
+  return hasPermission(user, 'manage_settings');
+}
+
+export function canManageThemes(user: SessionUser | null): boolean {
+  return hasPermission(user, 'manage_themes');
+}
+
+/** Either post permission qualifies — a new post's author is always the current user. */
+export function canCreatePost(user: SessionUser | null): boolean {
+  return hasPermission(user, 'manage_posts_own') || hasPermission(user, 'manage_posts_any');
+}
+
 /**
- * Editorial authorization for a specific post.
- * - `manage_posts_any` → can edit any post
- * - `manage_posts_own` + ownership → can edit only their own
+ * True for any staff account (holds at least one permission). Fences the admin
+ * dashboard off from permission-less self-registered subscribers.
  */
+export function hasAnyPermission(user: SessionUser | null): boolean {
+  return !!user && user.permissions.size > 0;
+}
+
+/** `manage_posts_any` edits any post; `manage_posts_own` edits only own posts. */
 export function canEditPost(user: SessionUser | null, post: { authorId: string }): boolean {
   if (!user) return false;
   if (user.permissions.has('manage_posts_any')) return true;
@@ -174,10 +179,9 @@ export function canEditPost(user: SessionUser | null, post: { authorId: string }
 }
 
 /**
- * Moderation rights for the comment queue. Gated on `manage_posts_any` —
- * if you can edit any post, you can moderate the discussion on it. Authors
- * (own-posts-only) deliberately don't qualify: queue access would surface
- * every commenter's email and IP across every post in the system.
+ * Comment-queue moderation, gated on `manage_posts_any`. Authors (own-posts-only)
+ * deliberately don't qualify: the queue exposes every commenter's email and IP
+ * across all posts.
  */
 export function canModerateComments(user: SessionUser | null): boolean {
   return hasPermission(user, 'manage_posts_any');

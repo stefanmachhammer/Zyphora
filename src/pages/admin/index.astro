@@ -1,16 +1,19 @@
 ---
 /**
- * Admin dashboard — landing page after login. Shows aggregate counts and the
- * five most recently-touched posts. Read-only; no mutations here.
+ * Admin dashboard — aggregate counts + five most-recently-touched posts.
+ * Read-only.
  */
 import AdminLayout from '../../layouts/AdminLayout.astro';
 import { db, schema } from '../../db/client.ts';
 import { eq, desc, sql } from 'drizzle-orm';
+import { hasAnyPermission } from '../../lib/auth.ts';
 
-// Cheap counts via SELECT COUNT(*) — far less data over the wire than
-// pulling every row only to read .length. mysql2 may surface COUNT() as a
-// string when totals exceed JS's safe-integer range; Number() narrows it
-// back without losing precision at the magnitudes we expect here.
+// Staff-only view (drafts included) — permission-less subscribers get 403.
+if (!hasAnyPermission(Astro.locals.user)) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+// mysql2 may return COUNT() as a string beyond JS's safe-integer range; Number() narrows it.
 const totalPostsRows = await db.select({ count: sql<number>`count(*)` }).from(schema.posts);
 const publishedPostsRows = await db
   .select({ count: sql<number>`count(*)` })

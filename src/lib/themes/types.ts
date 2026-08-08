@@ -1,17 +1,13 @@
 /**
- * Type definitions for the theme runtime.
- *
- * A "theme" is a directory under `themes/<slug>/` containing a `theme.json`
- * manifest, an `assets/` folder served at `/themes/<slug>/...`, and `templates/`
- * full of Eta templates that render the public site.
+ * Type definitions for the theme runtime. A theme is `themes/<slug>/` with a
+ * `theme.json` manifest, an `assets/` folder (served at `/themes/<slug>/...`),
+ * and `templates/` of Eta templates that render the public site.
  */
 
 /**
- * Shape of a theme's `theme.json` file. The file is the source of truth for
- * presentational metadata; the DB row mirrors a subset for fast lookups.
- *
- * `templates` lets a theme override which file backs each route. Defaults
- * resolved by the renderer are `index.eta`, `post.eta`, `404.eta`.
+ * Shape of a theme's `theme.json` (source of truth; the DB row mirrors a subset).
+ * `templates` overrides which file backs each route; renderer defaults are
+ * `index.eta`, `post.eta`, `404.eta`.
  */
 export type ThemeManifest = {
   slug: string;
@@ -28,10 +24,7 @@ export type ThemeManifest = {
   };
 };
 
-/**
- * In-memory representation of an installed theme — manifest + DB metadata +
- * the resolved absolute directory on disk. Returned from the registry.
- */
+/** Installed theme: manifest + DB metadata + absolute on-disk dir. From the registry. */
 export type ThemeRecord = ThemeManifest & {
   bundled: boolean;
   installedAt: Date;
@@ -40,10 +33,8 @@ export type ThemeRecord = ThemeManifest & {
 };
 
 /**
- * Public-facing post shape passed into theme templates.
- *
- * `contentHtml` is only populated for the single-post view; list views omit it
- * to keep the payload light.
+ * Public-facing post passed into templates. `contentHtml` is populated only on
+ * the single-post view; list views omit it.
  */
 export type SitePost = {
   slug: string;
@@ -52,17 +43,14 @@ export type SitePost = {
   contentHtml?: string;
   publishedAt: Date | null;
   authorName: string | null;
-  // Per-post comment toggle. Only populated on the single-post view; list
-  // views omit it. Themes should hide the comment form and the existing-
-  // comments section when false; the route enforces it server-side either way.
+  // Per-post comment toggle (single-post view only). Themes hide the form when
+  // false; the route enforces it server-side regardless.
   commentsEnabled?: boolean;
 };
 
 /**
- * Public-facing comment shape passed into theme templates. `content` is the
- * raw plain-text comment body; `contentHtml` is the same text escaped and
- * with `\n` converted to `<br>`, ready for `<%~ %>` in templates. The route
- * renders `contentHtml` so theme authors don't have to escape inline.
+ * Public-facing comment passed into templates. `content` is the raw plain-text
+ * body; `contentHtml` is it escaped with `\n`→`<br>`, ready for `<%~ %>`.
  */
 export type SiteComment = {
   id: string;
@@ -74,9 +62,8 @@ export type SiteComment = {
 };
 
 /**
- * Sticky-form payload used when a comment submission fails validation. The
- * page re-renders with the user's previous values (so they don't have to
- * retype) and a per-field error map keyed by the form field name.
+ * Sticky-form payload for a failed comment submission: the previous values
+ * plus a per-field error map keyed by form field name.
  */
 export type CommentFormState = {
   values: {
@@ -89,10 +76,8 @@ export type CommentFormState = {
 };
 
 /**
- * Minimal, public-safe shape of the signed-in user passed into theme
- * templates. Themes use this to render "Hi, <name>" + a logout link and to
- * branch on auth state. We deliberately omit the password hash and any other
- * server-only fields so a template can't accidentally leak them.
+ * Public-safe shape of the signed-in user for templates. Omits the password
+ * hash and other server-only fields so a template can't leak them.
  */
 export type SiteUser = {
   id: string;
@@ -102,16 +87,10 @@ export type SiteUser = {
 };
 
 /**
- * Sticky-form state for the public auth pages (`/login`, `/register`).
- *
- * On a failed submission the route re-renders the same template with the
- * user's previous values pre-filled and a per-field error map keyed by form
- * field name (e.g. `email`, `password`, `displayName`). A top-level `error`
- * carries form-wide messages like "Invalid email or password." that aren't
- * tied to a specific field.
- *
- * Themes can ignore `errors` entirely and just render `error` — the per-field
- * map is purely additive for themes that want inline messages.
+ * Sticky-form state for the auth pages (`/login`, `/register`) after a failed
+ * submission: pre-filled `values`, a per-field `errors` map, and a form-wide
+ * `error` (e.g. "Invalid email or password."). Themes may render just `error`
+ * and ignore the additive per-field map.
  */
 export type AuthFormState = {
   values: {
@@ -123,20 +102,14 @@ export type AuthFormState = {
 };
 
 /**
- * The object passed to every theme template. Templates can rely on every
- * field being present (helpers like `assetUrl` and `url.post` keep theme
- * authors from hand-stitching URLs that may change).
+ * The object passed to every theme template. Helpers like `assetUrl` and
+ * `url.post` keep authors from hand-stitching URLs that may change.
  */
 export type RenderContext = {
   site: {
     title: string;
     description: string;
-    /**
-     * Absolute or root-relative URL for the site favicon, or `null` when no
-     * favicon has been uploaded. Themes are expected to emit a `<link rel="icon">`
-     * when this is set and skip the tag otherwise — letting the browser fall
-     * back to its no-favicon glyph rather than 404'ing on a phantom link.
-     */
+    /** Favicon URL, or `null` if none uploaded. Themes emit `<link rel="icon">` only when set. */
     faviconUrl: string | null;
   };
   theme: {
@@ -155,46 +128,26 @@ export type RenderContext = {
   comments?: SiteComment[];
   /** Present only when the previous request was a failed comment submission. */
   commentForm?: CommentFormState;
-  /**
-   * The currently-signed-in user, or `null` for anonymous visitors. Always
-   * present (vs. `undefined`) so templates can write `<% if (currentUser) %>`
-   * without worrying about the key being missing.
-   */
+  /** Signed-in user, or `null` for anonymous. Always present so `if (currentUser)` is safe. */
   currentUser: SiteUser | null;
-  /**
-   * Present on `/login` and `/register` when re-rendering after a failed
-   * submission, or with empty defaults on the first GET. Themes use this to
-   * pre-fill the form and surface inline errors.
-   */
+  /** On `/login` and `/register`: pre-fill values and inline errors (empty on first GET). */
   authForm?: AuthFormState;
-  /**
-   * Where the auth pages will send the user after a successful login or
-   * registration. Themes round-trip this through a hidden input so the
-   * destination survives the POST. Always a same-origin path.
-   */
+  /** Same-origin post-auth redirect path; themes round-trip it through a hidden input. */
   authRedirect?: string;
   /**
-   * Set after a successful comment POST so the template can show a banner.
-   * `'pending'` means the comment is queued for moderation; `'approved'` means
-   * it was auto-published and is already visible in the list below.
+   * Set after a successful comment POST for a banner: `'pending'` = queued for
+   * moderation, `'approved'` = already visible below.
    */
   commentSubmitted?: 'pending' | 'approved' | null;
   /**
-   * Google reCAPTCHA v2 site key, or `null` when reCAPTCHA isn't configured.
-   * Themes that want spam protection render the widget — typically
-   * `<div class="g-recaptcha" data-sitekey="<%= recaptchaSiteKey %>"></div>`
-   * plus the `https://www.google.com/recaptcha/api.js` script — only when
-   * this is non-null. The server-side verifier also short-circuits when keys
-   * are missing, so a theme that ignores this field simply gets unprotected
-   * comments (the historical behavior).
+   * reCAPTCHA v2 site key, or `null` when unconfigured. Themes render the widget
+   * only when non-null; the server verifier also short-circuits when keys are
+   * missing, so ignoring this field just yields unprotected comments.
    */
   recaptchaSiteKey: string | null;
   /**
-   * Present on the search route. `query` is the trimmed user input; `total`
-   * lets templates show "N results for X" without re-counting `posts.length`.
-   * Themes that ship a `search.eta` use this; themes without one fall back to
-   * `index.eta`, which can also check for `search?.query` if it wants to
-   * render the same results inline.
+   * Present on the search route. `total` lets templates show "N results" without
+   * re-counting `posts`. Themes without `search.eta` fall back to `index.eta`.
    */
   search?: {
     query: string;

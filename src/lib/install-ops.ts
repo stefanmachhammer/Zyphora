@@ -1,12 +1,10 @@
 /**
- * Programmatic install operations — the pieces a fresh DB needs to become
- * a working ZyphoraCMS instance, callable both from the CLI scripts under
- * `src/db/` and from the web installer at `/install`.
+ * Programmatic install operations — what a fresh DB needs to become a working
+ * ZyphoraCMS instance, shared by the CLI scripts under `src/db/` and the web
+ * installer at `/install`.
  *
- * Each function is idempotent: re-running on an already-installed database
- * is a no-op (or, where applicable, a benign update). That's important
- * because the installer runs them in a single transaction-less sequence,
- * and a refresh-and-retry from the user must not corrupt anything.
+ * Each function is idempotent (no-op or benign update on re-run): the installer
+ * runs them without a transaction, so a refresh-and-retry must not corrupt anything.
  */
 import { db, schema } from '../db/client.ts';
 import { migrate as drizzleMigrate } from 'drizzle-orm/mysql2/migrator';
@@ -17,14 +15,9 @@ import { resolve } from 'node:path';
 import { setSetting } from './settings.ts';
 
 /**
- * The four system roles. Their slugs are referenced by name elsewhere (the
- * bootstrap admin is `admin`, /register hands out `subscriber`, etc.) so
- * they must exist before the first user is created. `system: true` flags
- * them as undeletable in the roles admin UI.
- *
- * Kept as a module-level constant rather than re-derived inside the seeder
- * because the installer surfaces "what got seeded" back to the operator on
- * success, and a single source of truth keeps that message accurate.
+ * The four system roles. Slugs are referenced by name elsewhere (bootstrap
+ * admin is `admin`, /register hands out `subscriber`) so they must exist
+ * before the first user. `system: true` flags them undeletable in the UI.
  */
 export const SYSTEM_ROLES: ReadonlyArray<{
   slug: string;
@@ -54,26 +47,22 @@ export const SYSTEM_ROLES: ReadonlyArray<{
     name: 'Author',
     permissions: ['manage_posts_own', 'manage_media'],
   },
-  // Subscriber is the role assigned to anyone signing up via /register.
-  // Empty permission set on purpose — they get a profile but no authoring
-  // rights until an admin promotes them.
+  // Assigned on /register. Empty permissions on purpose — a profile but no
+  // authoring rights until an admin promotes them.
   { slug: 'subscriber', name: 'Subscriber', permissions: [] },
 ];
 
 /**
- * Apply any pending SQL migrations from `./drizzle/`. Wraps
- * `drizzle-orm/mysql2/migrator` so call sites don't have to remember the
- * folder path. Idempotent — drizzle-kit tracks applied migrations in its
- * own bookkeeping table.
+ * Apply pending SQL migrations from `./drizzle/`. Idempotent — drizzle-kit
+ * tracks applied migrations in its own bookkeeping table.
  */
 export async function runMigrations(): Promise<void> {
   await drizzleMigrate(db, { migrationsFolder: resolve(process.cwd(), 'drizzle') });
 }
 
 /**
- * Insert any of the system roles that aren't already present. Returns the
- * slugs that were actually inserted (empty on a re-run) so the caller can
- * log a precise message.
+ * Insert any system roles not already present. Returns the slugs actually
+ * inserted (empty on a re-run) so the caller can log a precise message.
  */
 export async function seedSystemRoles(): Promise<string[]> {
   const existing = await db
@@ -95,9 +84,8 @@ export async function seedSystemRoles(): Promise<string[]> {
 }
 
 /**
- * Upsert the site title and description. Called by the installer with the
- * operator-supplied values; overwrites any existing rows on purpose because
- * the installer is the canonical place to set these for the first time.
+ * Upsert the site title and description. Overwrites existing rows — the
+ * installer is the canonical place to set these first.
  */
 export async function seedSiteSettings(input: {
   title: string;
@@ -108,8 +96,8 @@ export async function seedSiteSettings(input: {
 }
 
 /**
- * Seed defaults only if the keys don't exist yet. Used by the CLI seed so
- * re-running it never clobbers a customized site title.
+ * Seed defaults only if the keys don't exist yet, so re-running the CLI seed
+ * never clobbers a customized site title.
  */
 export async function seedSiteSettingsIfMissing(input: {
   title: string;
@@ -128,11 +116,6 @@ export async function seedSiteSettingsIfMissing(input: {
   return true;
 }
 
-/**
- * Result of `createAdminUser`. Returns the newly-created user id so the
- * web installer can immediately mint a session and log the operator in
- * without a second round-trip to the DB.
- */
 export interface CreatedAdmin {
   id: string;
   email: string;
@@ -140,15 +123,10 @@ export interface CreatedAdmin {
 }
 
 /**
- * Create the bootstrap admin user if no row with this email exists. Hashes
- * the password with Argon2id — never persist a plaintext password from
- * here or any caller.
- *
- * The `created` flag in the return value lets the installer distinguish
- * "I made the account" from "an account with this email already existed
- * (maybe from a previous /install attempt)". In the second case we still
- * return the existing user's id so the caller can log them in if they
- * supplied the right password — but verifying that is the caller's job.
+ * Create the bootstrap admin if no row with this email exists (password hashed
+ * with Argon2id — never persist plaintext). `created: false` means the account
+ * already existed (e.g. a prior /install attempt); the existing id is still
+ * returned, but verifying the supplied password is the caller's job.
  */
 export async function createAdminUser(input: {
   email: string;

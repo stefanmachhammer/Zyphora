@@ -1,16 +1,10 @@
 ---
 /**
- * Public registration page — creates a `subscriber` account and signs the
- * user in immediately. Rendered by the active theme.
+ * Public registration page — creates a `subscriber` account (empty permissions)
+ * and signs the user in immediately. Rendered by the active theme.
  *
- * Self-signups always land in the `subscriber` role (empty permissions). The
- * role is seeded by migration 0007; admins can rename it via the roles UI but
- * the slug `subscriber` is what we write here. Anyone who needs to author
- * posts gets promoted by an admin afterwards — this route does not expose a
- * role dropdown.
- *
- * The post-register redirect is locked to same-origin paths for the same
- * open-redirect reason as /login (see safeRedirect there for the details).
+ * No role dropdown: self-signups are always `subscriber`; an admin promotes
+ * anyone who needs to author. Redirect is same-origin-locked like /login.
  */
 import { db, schema } from '../db/client.ts';
 import { eq } from 'drizzle-orm';
@@ -33,8 +27,7 @@ if (Astro.locals.user) {
   return Astro.redirect(redirectTo);
 }
 
-// Field-level constraints. `min(8)` mirrors the admin user form; `max(200)`
-// on password is just a sanity bound so a giant input can't bog down Argon2.
+// `max(200)` on password caps Argon2 input; `min(8)` mirrors the admin user form.
 const registerSchema = z.object({
   email: z.email({ message: 'Enter a valid email address.' }).trim().toLowerCase(),
   displayName: z.string({ message: 'Display name is required.' }).trim().min(1, 'Display name is required.').max(100, 'Display name is too long.'),
@@ -50,9 +43,7 @@ if (Astro.request.method === 'POST') {
   const password = String(form.get('password') ?? '');
   const postedRedirect = safeRedirect(String(form.get('redirect') ?? '') || redirectTo);
 
-  // Echo the user's input back so a validation error doesn't wipe the form.
-  // We never echo the password — that'd be a UX gain at the cost of leaking
-  // it into the rendered HTML if the page is cached anywhere upstream.
+  // Echo input back on error, but never the password (would leak into cached HTML).
   authForm.values.email = rawEmail.toLowerCase();
   authForm.values.displayName = rawDisplayName;
 
@@ -63,8 +54,7 @@ if (Astro.request.method === 'POST') {
   });
 
   if (!parsed.success) {
-    // Project Zod's issue list into a per-field error map so themes can show
-    // messages inline. First message per field wins; the rest are dropped.
+    // Project Zod issues into a per-field error map (first message per field wins).
     for (const issue of parsed.error.issues) {
       const key = String(issue.path[0] ?? '_');
       if (!authForm.errors[key]) authForm.errors[key] = issue.message;
@@ -77,10 +67,7 @@ if (Astro.request.method === 'POST') {
       .where(eq(schema.users.email, parsed.data.email))
       .limit(1);
     if (existing.length > 0) {
-      // Email collision: same generic surface area as login — don't hint
-      // whether the address is registered ("an account with this email exists"
-      // is itself a probe vector). The duplicate is rejected, the user picks
-      // a different one or signs in.
+      // Generic message — confirming an address is registered is itself a probe vector.
       authForm.errors.email = 'That email is not available.';
       authForm.error = 'Please fix the highlighted fields.';
     } else {
@@ -92,7 +79,7 @@ if (Astro.request.method === 'POST') {
         displayName: parsed.data.displayName,
         role: SUBSCRIBER_ROLE,
       });
-      // Sign them in immediately so registration → first page view is one hop.
+      // Sign them in immediately.
       const session = await createSession(userId);
       setSessionCookie(Astro, session.id, session.expiresAt);
       return Astro.redirect(postedRedirect);

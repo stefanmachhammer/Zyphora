@@ -1,32 +1,16 @@
 /**
- * Drizzle schema — the single source of truth for the MySQL layout.
+ * Drizzle schema — single source of truth for the MySQL layout. Migrations in
+ * `./drizzle/` are generated from this file (`npm run db:generate`); re-running
+ * generate overwrites hand-edited SQL.
  *
- * Migrations in `./drizzle/` are generated from this file via `npm run db:generate`
- * and applied by `npm run db:migrate`. Don't edit produced SQL by hand unless
- * you know exactly what you're doing — re-running generate after a manual
- * edit will overwrite it.
- *
- * Type aliases at the bottom (`User`, `NewPost`, etc.) are inferred from the
- * tables and re-exported so other modules don't need to import drizzle to
- * type their function signatures.
- *
- * Column-length notes:
- *  - Text-IDs that hold a UUID v4 are sized at 36 chars (canonical form).
- *  - Email columns use 254 — the practical RFC 5321 path-length cap.
- *  - Session tokens are 24 random bytes encoded as base64url (~32 chars);
- *    varchar(64) leaves headroom for any future encoding change.
- *  - Post `contentHtml` uses `mediumtext` (~16 MB). Stock `text` caps at 64 KB
- *    which is too small for long posts; sanitized HTML can easily push past it.
- *  - utf8mb4 is set at the connection level (see `db/client.ts`); MySQL 8's
- *    default collation handles emoji and non-BMP characters in titles and
- *    content without us having to override per-column.
+ * Column-length conventions: UUID v4 IDs are 36 chars (canonical form); emails
+ * 254 (RFC 5321 cap). utf8mb4 is set at the connection level (see `db/client.ts`),
+ * so emoji / non-BMP characters round-trip without per-column overrides.
  */
 import { mysqlTable, varchar, text, mediumtext, int, boolean, timestamp, json } from 'drizzle-orm/mysql-core';
 
-// Authoring accounts. `role` is a slug into the `roles` table — no enum here
-// so admins can define custom roles. Validity is enforced at the application
-// layer (the admin UI only exposes existing role slugs); we deliberately skip
-// a hard FK to keep the migration that introduced the roles table simple.
+// `role` is a slug into `roles` (not an enum, so admins can define custom
+// roles); validity is enforced in the app layer, no hard FK by design.
 // `passwordHash` is Argon2 (see lib/auth.ts), never anything else.
 export const users = mysqlTable('users', {
   id: varchar('id', { length: 36 }).primaryKey(),
@@ -37,12 +21,10 @@ export const users = mysqlTable('users', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
-// Role definitions. `permissions` is a JSON array of permission keys (see
-// PERMISSION_KEYS in lib/auth.ts) — MySQL's native `json` type stores it as
-// a real JSON document and Drizzle (de)serializes on read/write. `system: true`
-// marks the three built-in roles so the admin UI prevents them from being
-// renamed or deleted (which would otherwise risk locking everyone out of the
-// CMS).
+// `permissions` is a JSON array of permission keys (see PERMISSION_KEYS in
+// lib/auth.ts), stored in MySQL's native `json` type. `system: true` marks the
+// built-in roles so the admin UI blocks renaming/deleting them (which could
+// otherwise lock everyone out).
 export const roles = mysqlTable('roles', {
   slug: varchar('slug', { length: 32 }).primaryKey(),
   name: varchar('name', { length: 50 }).notNull(),
@@ -51,39 +33,30 @@ export const roles = mysqlTable('roles', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
-// Server-side session records keyed by the random token in the
-// `zyphora_session` cookie. Cascades on user delete so removing a user
-// implicitly logs out their open sessions.
+// Keyed by the random token in the `zyphora_session` cookie. Cascades on user
+// delete so removing a user logs out their open sessions.
 export const sessions = mysqlTable('sessions', {
   id: varchar('id', { length: 64 }).primaryKey(),
   userId: varchar('user_id', { length: 36 }).notNull().references(() => users.id, { onDelete: 'cascade' }),
   expiresAt: timestamp('expires_at').notNull(),
 });
 
-// Posts — the only content type currently. `contentHtml` is post-sanitization
-// HTML (see lib/sanitize.ts); `slug` is uniquified by lib/posts.ts before
-// insert. Drafts are filtered out of public queries everywhere.
+// `contentHtml` is post-sanitization HTML (see lib/sanitize.ts); `slug` is
+// uniquified by lib/posts.ts before insert.
 export const posts = mysqlTable('posts', {
   id: varchar('id', { length: 36 }).primaryKey(),
   slug: varchar('slug', { length: 100 }).notNull().unique(),
   title: varchar('title', { length: 200 }).notNull(),
-  // Excerpt is optional plain text shown above the body on listings.
   excerpt: varchar('excerpt', { length: 500 }),
   // mediumtext rather than `text` so long-form posts don't bump the 64 KB cap.
   contentHtml: mediumtext('content_html').notNull(),
   status: varchar('status', { length: 16, enum: ['draft', 'published'] }).notNull().default('draft'),
   category: varchar('category', { length: 16, enum: ['news', 'travel', 'gadgets', 'reviews'] }).notNull().default('news'),
-  // Per-post comment toggle. Defaults to true so existing posts and the
-  // common case ("comments on") need no extra clicks; flip to false in the
-  // admin to suppress the comment form and hide the section from templates.
-  // Existing approved comments are kept in the DB regardless — disabling is
-  // a display/intake switch, not a delete.
+  // Display/intake switch, not a delete — existing comments stay in the DB.
   commentsEnabled: boolean('comments_enabled').notNull().default(true),
-  // Per-post moderation override. `null` means "inherit the site-wide
-  // `require_comment_moderation` setting" (the common case). `true` forces
-  // moderation on this post regardless of the site default; `false` makes new
-  // comments auto-approve. Kept tri-state on purpose: a boolean with a default
-  // can't distinguish "I picked the site default" from "I unchecked the box."
+  // Tri-state override: null inherits the site `require_comment_moderation`
+  // setting, true forces moderation, false auto-approves. A defaulted boolean
+  // couldn't distinguish "picked the site default" from "unchecked the box."
   moderateComments: boolean('moderate_comments'),
   authorId: varchar('author_id', { length: 36 }).notNull().references(() => users.id),
   publishedAt: timestamp('published_at'),
@@ -91,9 +64,8 @@ export const posts = mysqlTable('posts', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
-// Uploaded files. The bytes themselves live under `public/uploads/`; this
-// table only holds metadata. `filename` is the random UUID name on disk;
-// `originalName` is what the user uploaded.
+// Metadata only — the bytes live under `public/uploads/`. `filename` is the
+// random UUID name on disk; `originalName` is what the user uploaded.
 export const media = mysqlTable('media', {
   id: varchar('id', { length: 36 }).primaryKey(),
   filename: varchar('filename', { length: 255 }).notNull(),
@@ -104,17 +76,15 @@ export const media = mysqlTable('media', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
-// Generic key/value site settings (e.g. `site_title`, `active_theme`).
-// All access goes through lib/settings.ts so upserts stay consistent.
-// `value` is plain text — callers JSON-encode structured values themselves.
+// Key/value site settings. Access goes through lib/settings.ts. `value` is
+// plain text — callers JSON-encode structured values themselves.
 export const settings = mysqlTable('settings', {
   key: varchar('key', { length: 64 }).primaryKey(),
   value: text('value').notNull(),
 });
 
-// Theme registry — kept in sync with what's actually on disk under `themes/`.
-// `bundled` marks themes that ship in-repo (e.g. `default`) so they can't be
-// uninstalled from the admin UI.
+// Mirrors what's on disk under `themes/`. `bundled` marks in-repo themes
+// (e.g. `default`) so they can't be uninstalled from the admin UI.
 export const themes = mysqlTable('themes', {
   slug: varchar('slug', { length: 64 }).primaryKey(),
   name: varchar('name', { length: 100 }).notNull(),
@@ -125,10 +95,9 @@ export const themes = mysqlTable('themes', {
   installedAt: timestamp('installed_at').notNull().defaultNow(),
 });
 
-// Guest comments on posts. Stored as plain text — `content` is HTML-stripped
-// in lib/comments.ts before insert and escaped on render. Cascades on post
-// delete so removing a post removes its discussion. Every new comment lands
-// in `pending` and only appears publicly once a moderator approves it.
+// `content` is HTML-stripped in lib/comments.ts before insert and escaped on
+// render. Cascades on post delete. New comments default to `pending` and only
+// appear publicly once a moderator approves them.
 export const comments = mysqlTable('comments', {
   id: varchar('id', { length: 36 }).primaryKey(),
   postId: varchar('post_id', { length: 36 }).notNull().references(() => posts.id, { onDelete: 'cascade' }),

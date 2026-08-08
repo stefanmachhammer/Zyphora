@@ -1,38 +1,20 @@
 /**
- * Update check — pings the GitHub releases API at server startup and, if a
- * newer version of ZyphoraCMS is available, prints a one-time notice to the
- * terminal.
+ * Update check — pings the GitHub releases API at startup and prints a one-time
+ * notice if a newer version exists. Side-effect imported from `src/middleware.ts`
+ * (like `banner.ts`); fire-and-forget so it never delays boot.
  *
- * Wired in as a side-effect import from `src/middleware.ts`, mirroring the
- * `banner.ts` pattern. The HTTP call is fire-and-forget — never awaited at
- * module top level — so it does not delay server boot. The notification
- * lands in the terminal below the existing boot logs once the request
- * resolves (typically well under a second).
- *
- * Opt-outs and safety:
- *  - `ZYPHORA_NO_UPDATE_CHECK=1` skips the network call entirely. Useful
- *    for air-gapped deploys, CI, or operators who don't want a daily ping
- *    to api.github.com from each running server.
- *  - `NO_COLOR` strips ANSI styling, per https://no-color.org.
- *  - A 3s `AbortController` timeout means a slow/unreachable GitHub never
- *    leaves the request dangling.
- *  - Any error (network, rate limit, malformed response, unparseable
- *    version) is swallowed silently. A startup health check must never
- *    spam the operator's console.
- *  - The process-wide `Symbol.for` guard prevents Vite/HMR re-imports
- *    from triggering repeated network calls during development.
+ * Opt-outs / safety: `ZYPHORA_NO_UPDATE_CHECK=1` skips the network call
+ * (air-gapped/CI); `NO_COLOR` strips ANSI; a 3s abort timeout bounds a slow
+ * GitHub; all errors are swallowed; the `Symbol.for` guard blocks HMR re-runs.
  */
 import { VERSION } from './version.ts';
 
-// Hardcoded repo coordinates. If the project is ever forked or moved,
-// this is the single source of truth for where "latest release" lives.
+// Single source of truth for where "latest release" lives.
 const REPO = 'stefanmachhammer/Zyphora';
 const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 const FETCH_TIMEOUT_MS = 3000;
 
-// Process-wide guard. `Symbol.for` is keyed by string so the flag survives
-// even when this module is re-evaluated under a fresh identity during dev
-// HMR, keeping the check (and any printed notice) to once per process.
+// Process-wide guard; string-keyed `Symbol.for` survives dev-HMR re-evaluation.
 const CHECKED = Symbol.for('zyphora.update.checked');
 const globalScope = globalThis as unknown as Record<symbol, boolean>;
 
@@ -41,9 +23,7 @@ const optedOut = process.env.ZYPHORA_NO_UPDATE_CHECK === '1';
 
 if (!globalScope[CHECKED] && !optedOut) {
   globalScope[CHECKED] = true;
-  // `void` discards the promise on purpose — awaiting here would block
-  // module evaluation, which in turn would block Astro's server boot
-  // behind a third-party HTTP request. Errors are handled inside.
+  // `void`: don't await — that would block server boot on a third-party HTTP call.
   void checkForUpdate();
 }
 
@@ -56,13 +36,8 @@ interface SemVer {
 }
 
 /**
- * Parse a version string like `"1.2.3"` or `"v1.2.3-rc.1"` into its parts.
- * Returns null for anything that doesn't look like semver — callers treat
- * null as "skip the comparison" rather than guessing.
- *
- * We hand-roll this instead of depending on the `semver` package because
- * the only operation we need is "is A newer than B"; pulling in a 50 kB
- * dependency for two compares is not worth it.
+ * Parse `"1.2.3"` / `"v1.2.3-rc.1"` into parts; null for non-semver (callers
+ * skip the comparison). Hand-rolled to avoid the `semver` dependency for one compare.
  */
 function parseVersion(input: string): SemVer | null {
   const m = input.trim().replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)(?:-([\w.-]+))?$/);
@@ -76,14 +51,10 @@ function parseVersion(input: string): SemVer | null {
 }
 
 /**
- * Compare two parsed semvers. Returns >0 if `a` is newer, <0 if `b` is
- * newer, 0 if equal.
- *
- * Pre-release semantics follow the spec: a pre-release sorts *before* the
- * same base version (so `1.2.0-rc.1 < 1.2.0`). When both sides are
- * pre-releases of the same base, we fall back to lexicographic compare —
- * imperfect for cases like `rc.10` vs `rc.2`, but good enough for the
- * "is there something newer to upgrade to" question this module answers.
+ * Compare two semvers: >0 if `a` newer, <0 if `b` newer, 0 if equal.
+ * Per spec a pre-release sorts before its base (`1.2.0-rc.1 < 1.2.0`); two
+ * pre-releases of one base fall back to lexicographic (imperfect for `rc.10`
+ * vs `rc.2`, fine for the "is there an upgrade" question here).
  */
 function compareVersion(a: SemVer, b: SemVer): number {
   if (a.major !== b.major) return a.major - b.major;
@@ -96,10 +67,8 @@ function compareVersion(a: SemVer, b: SemVer): number {
 }
 
 /**
- * Fetch the latest release from GitHub and, if it's newer than the running
- * version, print a notice. All failure modes (network down, non-2xx, JSON
- * shape mismatch, unparseable tag) exit silently — the operator should
- * never see a stack trace just because GitHub had a hiccup.
+ * Fetch the latest release and print a notice if it's newer. Every failure
+ * mode (network, non-2xx, bad JSON, unparseable tag) exits silently.
  */
 async function checkForUpdate(): Promise<void> {
   const current = parseVersion(VERSION);
@@ -108,19 +77,14 @@ async function checkForUpdate(): Promise<void> {
   let latestTag: string;
   let releaseUrl: string;
   try {
-    // AbortController wires Node's `fetch` timeout. Without it, a hung
-    // socket would leave the promise (and a file descriptor) pending for
-    // the lifetime of the process.
+    // Bounds a hung socket that would otherwise leave the request pending forever.
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
     const res = await fetch(RELEASES_URL, {
       signal: controller.signal,
       headers: {
-        // GitHub's recommended Accept header for the REST API.
         Accept: 'application/vnd.github+json',
-        // Identifying ourselves is good API etiquette and helps GitHub
-        // attribute traffic in case of debugging.
         'User-Agent': `ZyphoraCMS/${VERSION}`,
       },
     });
@@ -130,46 +94,31 @@ async function checkForUpdate(): Promise<void> {
     const json = (await res.json()) as { tag_name?: string; html_url?: string };
     if (!json.tag_name) return;
     latestTag = json.tag_name;
-    // Prefer the URL GitHub returns; fall back to the canonical tag URL
-    // if the response shape is missing it for some reason.
     releaseUrl = json.html_url ?? `https://github.com/${REPO}/releases/tag/${latestTag}`;
   } catch {
-    // Network error, abort, parse failure — swallow and move on. No log.
-    return;
+    return; // swallow — no log
   }
 
   const latest = parseVersion(latestTag);
   if (!latest) return;
-  // Strictly newer only. We never want to nag users who are running a
-  // newer dev build than what's on GitHub (e.g. local clone ahead of main).
+  // Strictly newer only, so a local build ahead of GitHub isn't nagged.
   if (compareVersion(latest, current) <= 0) return;
 
   printUpdateNotice(VERSION, latestTag, releaseUrl);
 }
 
-/**
- * Wrap `text` in a 24-bit ANSI foreground color escape, then reset.
- * Returns the bare text if colors are disabled via NO_COLOR. Mirrors the
- * tiny helper in `banner.ts` rather than sharing it, to keep both modules
- * self-contained and trivially deletable.
- */
+/** Wrap `text` in a 24-bit ANSI color escape (bare text when NO_COLOR). Twin of banner.ts's, kept separate so each module is deletable. */
 function rgb(r: number, g: number, b: number, text: string): string {
   if (noColor) return text;
   return `\x1b[38;2;${r};${g};${b}m${text}\x1b[0m`;
 }
 
-/**
- * Print the "update available" notice. Kept to three lines so it stays
- * legible in a tailing pager (no box-drawing borders, no multi-paragraph
- * walls of ANSI). The third line tells the operator how to silence the
- * check if they don't want it.
- */
+/** Print the three-line "update available" notice. */
 function printUpdateNotice(current: string, latest: string, url: string): void {
   const bold = noColor ? '' : '\x1b[1m';
   const dim = noColor ? '' : '\x1b[2m';
   const reset = noColor ? '' : '\x1b[0m';
-  // Amber for the marker so it visually reads as a soft warning (not an
-  // error), cyan for the new version to echo the banner's accent color.
+  // Amber marker reads as a soft warning; cyan version echoes the banner accent.
   const amber = (s: string) => rgb(255, 184, 88, s);
   const cyan = (s: string) => rgb(88, 217, 255, s);
 

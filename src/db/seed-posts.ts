@@ -1,12 +1,7 @@
 /**
- * Demo posts seed.
- *
- * Idempotent — keyed off slug. Re-running on a DB that already has these
- * posts is a no-op. Safe to run after `db:seed` (which only seeds the admin
- * + settings, never posts).
- *
- * Authorship resolves to the bootstrap admin (or `SEED_ADMIN_EMAIL`). If no
- * admin exists yet, the script bails — run `db:seed` first.
+ * Demo posts seed. Idempotent — keyed off slug, so re-running is a no-op.
+ * Authorship resolves to the bootstrap admin (`SEED_ADMIN_EMAIL`); bails if no
+ * admin exists yet, so run `db:seed` first.
  */
 import { db, schema } from './client.ts';
 import { eq } from 'drizzle-orm';
@@ -24,7 +19,7 @@ if (!author) {
 }
 
 // daysAgo is relative to "now" so re-running keeps a sensible chronology
-// without us needing to hardcode dates.
+// without hardcoded dates.
 type Category = 'news' | 'travel' | 'gadgets' | 'reviews';
 type DemoPost = { title: string; excerpt: string; contentHtml: string; daysAgo: number; category: Category };
 
@@ -120,9 +115,8 @@ let skipped = 0;
 
 for (const post of demoPosts) {
   const slug = slugify(post.title);
-  // Slug is the idempotency key — if it already exists, skip silently.
-  // We deliberately don't update existing rows, because re-running shouldn't
-  // clobber edits a user has made to seeded content.
+  // Skip existing slugs rather than update, so re-running doesn't clobber user
+  // edits to seeded content.
   const existing = await db.select({ id: schema.posts.id }).from(schema.posts).where(eq(schema.posts.slug, slug)).limit(1);
   if (existing.length > 0) {
     skipped += 1;
@@ -145,9 +139,8 @@ for (const post of demoPosts) {
   inserted += 1;
 }
 
-// One-time backfill for rows seeded before `category` existed: only touch
-// rows still on the schema default ('news') so user edits to category aren't
-// clobbered. Idempotent — once corrected, subsequent runs find nothing to do.
+// Backfill for rows seeded before `category` existed: only touch rows still on
+// the schema default ('news') so user category edits aren't clobbered.
 let recategorized = 0;
 for (const post of demoPosts) {
   if (post.category === 'news') continue;

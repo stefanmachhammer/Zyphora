@@ -1,13 +1,12 @@
 /**
- * Theme installer — accepts a zip upload, validates it, and lays it out
- * under `themes/<slug>/`.
+ * Theme installer — validates a zip upload and lays it out under `themes/<slug>/`.
  *
  * Threat model:
- *   - The upload endpoint is admin-only (middleware enforces this).
- *   - Theme templates execute server-side as Eta — installing a theme is
- *     equivalent to giving it code execution. We surface this in the UI.
- *   - The installer guards against zip-slip (entries whose path resolves
- *     outside the destination dir) and oversized payloads.
+ *   - Upload is admin-only (middleware-enforced).
+ *   - Templates execute server-side as Eta, so installing a theme = granting
+ *     code execution. The UI says so.
+ *   - Guards against zip-slip (paths resolving outside dest) and oversized/
+ *     zip-bomb payloads.
  */
 
 import AdmZip from 'adm-zip';
@@ -41,12 +40,9 @@ const installManifestSchema = z.object({
 });
 
 /**
- * Strip a single optional top-level wrapper directory (e.g. `my-theme/...`)
- * from zip entry names. People zip themes both ways — with and without a
- * containing folder — and forcing one convention is a bad UX.
- *
- * If every entry shares the same first segment, drop it. Otherwise leave
- * names alone.
+ * Strip a single optional wrapper dir (`my-theme/...`) from entry names —
+ * people zip themes both with and without one. If every entry shares the same
+ * first segment, drop it; otherwise leave names alone.
  */
 function detectPrefix(entryNames: string[]): string {
   if (entryNames.length === 0) return '';
@@ -79,10 +75,9 @@ type ParsedManifest = z.infer<typeof installManifestSchema>;
 type StrippedEntry = { raw: AdmZip.IZipEntry; rel: string };
 
 /**
- * Parse and validate an uploaded zip buffer without writing anything.
- * Returns the entries (with any single wrapper dir stripped) and the
- * parsed `theme.json`. Throws human-readable errors for every rejection
- * case so callers can surface them verbatim in the admin UI.
+ * Parse and validate an uploaded zip buffer without writing anything. Returns
+ * the stripped entries and parsed `theme.json`. Throws human-readable errors
+ * callers can surface verbatim in the admin UI.
  */
 function parseThemeZip(buffer: Buffer): { stripped: StrippedEntry[]; manifest: ParsedManifest } {
   if (buffer.length === 0) throw new Error('Empty upload');
@@ -98,10 +93,9 @@ function parseThemeZip(buffer: Buffer): { stripped: StrippedEntry[]; manifest: P
   const entries = zip.getEntries();
   if (entries.length === 0) throw new Error('Zip is empty');
 
-  // Normalize entry names to POSIX separators. The zip spec mandates `/`, but
-  // some Windows zip tools (and adm-zip on Windows hosts) surface backslashes,
-  // which Linux treats as literal filename characters — files would land at
-  // `themes/<slug>/templates\index.eta` instead of `templates/index.eta`.
+  // Normalize to POSIX separators: some Windows zip tools emit backslashes,
+  // which Linux treats as literal filename chars (files would land at
+  // `templates\index.eta` instead of `templates/index.eta`).
   const entryNames = entries.map((e) => e.entryName.replace(/\\/g, '/'));
 
   const prefix = detectPrefix(entryNames);
@@ -128,18 +122,13 @@ function parseThemeZip(buffer: Buffer): { stripped: StrippedEntry[]; manifest: P
 }
 
 /**
- * Extract validated zip entries into a fresh destination directory.
+ * Extract validated entries into a fresh `dest` (caller ensures it's absent).
+ * On any failure the partial dir is removed before rethrowing, so `dest` ends
+ * up either fully populated and lint-clean or absent.
  *
- * Caller must ensure `dest` does not yet exist. On any failure (zip bomb,
- * unsafe path, lint error) the partially-extracted directory is removed
- * before the error is re-thrown — `dest` is either fully populated and
- * lint-clean or absent.
- *
- * Steps:
- *  1. Sum uncompressed sizes (zip-bomb guard).
- *  2. Extract each entry, validating that its resolved path stays inside dest.
- *  3. Lint the resulting `templates/` dir so render-time failures surface
- *     here instead of on the next page render.
+ * Steps: (1) sum uncompressed sizes (zip-bomb guard), (2) extract each entry
+ * checking its resolved path stays inside dest, (3) lint `templates/` so
+ * render-time failures surface here, not on the next page render.
  */
 function extractZipToDir(stripped: StrippedEntry[], dest: string): void {
   let total = 0;
@@ -157,8 +146,8 @@ function extractZipToDir(stripped: StrippedEntry[], dest: string): void {
       if (e.raw.isDirectory || e.rel === '') continue;
       if (!isSafeRelative(e.rel)) throw new Error(`Unsafe path in zip: ${e.rel}`);
       const outPath = join(dest, e.rel);
-      // Defense-in-depth: even after isSafeRelative, verify the resolved path
-      // is inside `dest`. Catches symlink/encoding tricks AdmZip might miss.
+      // Defense-in-depth beyond isSafeRelative: verify the resolved path stays
+      // inside `dest`, catching symlink/encoding tricks AdmZip might miss.
       const resolvedOut = resolve(outPath);
       if (!resolvedOut.startsWith(resolve(dest) + sep) && resolvedOut !== resolve(dest)) {
         throw new Error(`Unsafe path in zip: ${e.rel}`);
@@ -167,31 +156,25 @@ function extractZipToDir(stripped: StrippedEntry[], dest: string): void {
       writeFileSync(outPath, e.raw.getData());
     }
 
-    // Lint every `.eta` file the zip dropped under `templates/`. A theme with
-    // any of the failure modes catalogued in `lint.ts` (issue #5) would
-    // otherwise install cleanly and explode at first render — the user would
-    // see a SyntaxError pointing at compiled JS, with no obvious connection
-    // back to the upload. Catching it here keeps the failure local to the
-    // upload/update action.
+    // Lint the extracted `templates/`. Without this, a template with any lint.ts
+    // failure mode (issue #5) installs cleanly and explodes at first render with
+    // a compiled-JS SyntaxError; catching here keeps the failure at upload time.
     const lintIssues = lintTemplatesDir(join(dest, 'templates'));
     if (lintIssues.length > 0) {
       throw new Error(`Theme templates have errors:\n\n${formatLintIssues(lintIssues)}`);
     }
   } catch (err) {
-    // Roll back partial extraction on any error so the dir doesn't end up
-    // half-populated and confuse the registry on next scan.
+    // Roll back the partial extraction so the registry's next scan sees no
+    // half-populated dir.
     rmSync(dest, { recursive: true, force: true });
     throw err;
   }
 }
 
 /**
- * Install a theme from an uploaded zip buffer.
- *
- * Refuses to overwrite existing themes — admins must delete first or call
- * `updateFromZip` to replace an existing install in place. The hard
- * separation keeps accidental overwrites and silent downgrades from
- * happening through the install path.
+ * Install a theme from an uploaded zip. Refuses to overwrite an existing
+ * theme — admins delete first or use `updateFromZip` — so the install path
+ * can't cause an accidental overwrite or silent downgrade.
  */
 export async function installFromZip(buffer: Buffer): Promise<InstallResult> {
   const { stripped, manifest } = parseThemeZip(buffer);
@@ -208,24 +191,14 @@ export async function installFromZip(buffer: Buffer): Promise<InstallResult> {
 }
 
 /**
- * Update an already-installed theme by replacing its directory with a fresh
- * zip extraction.
+ * Update an installed theme by replacing its dir with a fresh extraction,
+ * stage-then-swap: (1) extract+lint into a hidden `.staging-` dir under
+ * THEMES_DIR (same volume → fast, atomic-ish rename), (2) move the live dir to
+ * a `.backup-`, (3) move staging live, (4) delete the backup. If step 3 fails
+ * the backup is restored.
  *
- * The update is "stage then swap":
- *   1. Extract+lint the new zip into a hidden staging dir under THEMES_DIR
- *      (same volume → rename is fast and stays atomic-ish on Windows).
- *   2. Move the live dir aside to a hidden backup.
- *   3. Move staging into the live slot.
- *   4. Delete the backup.
- *
- * If step 3 fails, the backup is moved back so the previous install is
- * restored. The render cache is cleared on success so the active theme
- * picks up the new templates on the next request.
- *
- * Refuses:
- *   - bundled themes (their source of truth is the codebase, not uploads)
- *   - mismatched slugs (the zip's `theme.json` slug must equal the target)
- *   - missing target (caller should `installFromZip` instead)
+ * Refuses bundled themes (codebase-owned), slug mismatches (zip slug must equal
+ * target), and missing targets (use `installFromZip`).
  */
 export async function updateFromZip(slug: string, buffer: Buffer): Promise<UpdateResult> {
   if (slug === DEFAULT_THEME_SLUG) {
@@ -244,15 +217,13 @@ export async function updateFromZip(slug: string, buffer: Buffer): Promise<Updat
   const prevManifest = readManifest(slug);
   const fromVersion = prevManifest?.version ?? null;
 
-  // Stage extraction inside THEMES_DIR so the eventual rename is same-volume.
-  // The dot prefix keeps `scanThemes` from picking the staging dir up if a
-  // request lands mid-update (registry skips dot-prefixed entries).
+  // Stage inside THEMES_DIR (same-volume rename). The dot prefix hides it from
+  // `scanThemes` if a request lands mid-update.
   const staging = join(THEMES_DIR, `.staging-${slug}-${randomUUID()}`);
   extractZipToDir(stripped, staging);
 
-  // Swap. We move the current install aside first so we can roll back if the
-  // staging→live rename fails (rare on the same volume, but possible if a
-  // file inside is locked on Windows).
+  // Move the current install aside first, so we can roll back if the
+  // staging→live rename fails (possible if a file is locked on Windows).
   const backup = join(THEMES_DIR, `.backup-${slug}-${randomUUID()}`);
   try {
     renameSync(dest, backup);
@@ -263,8 +234,8 @@ export async function updateFromZip(slug: string, buffer: Buffer): Promise<Updat
   try {
     renameSync(staging, dest);
   } catch (err) {
-    // Restore the previous install. If even the rollback fails the live dir
-    // is gone; surface both errors so the admin can recover manually.
+    // Restore the previous install. If the rollback also fails the live dir is
+    // gone; surface both errors so the admin can recover manually.
     try {
       renameSync(backup, dest);
     } catch (restoreErr) {
@@ -285,11 +256,8 @@ export async function updateFromZip(slug: string, buffer: Buffer): Promise<Updat
 }
 
 /**
- * Uninstall a theme.
- *
- * Refuses to delete:
- *   - bundled themes (currently `default`) — they are part of the codebase
- *   - the currently active theme — switch first to avoid a blank site
+ * Uninstall a theme. Refuses bundled themes (codebase-owned) and the active
+ * theme (switch first to avoid a blank site).
  */
 export async function uninstallTheme(slug: string): Promise<void> {
   if (slug === DEFAULT_THEME_SLUG) throw new Error('Cannot delete the bundled default theme');
@@ -302,10 +270,7 @@ export async function uninstallTheme(slug: string): Promise<void> {
   clearRenderCache();
 }
 
-/**
- * Convenience used by the admin UI to switch the active theme — wraps
- * `setActiveTheme` so renders pick up the new theme on the next request.
- */
+/** Switch the active theme and clear the render cache so the next request uses it. */
 export async function activateTheme(slug: string): Promise<void> {
   await setActiveTheme(slug);
   clearRenderCache();

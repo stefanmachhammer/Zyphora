@@ -1,19 +1,16 @@
 /**
- * HTML sanitizer used on every piece of user-authored markup before storage.
+ * HTML sanitizer for every piece of user-authored markup before storage.
  *
- * The allowlist is intentionally narrow — covers what the TipTap toolbar can
- * produce. Adding tags here loosens the security boundary, so think before
- * you add and prefer to extend the editor toolbar to match an existing tag
- * over opening up an exotic one.
+ * The allowlist is deliberately narrow — just what the TipTap toolbar produces.
+ * Each added tag widens the security boundary, so prefer matching an existing
+ * tag over opening an exotic one.
  *
- * IMPORTANT: every field that holds rich HTML must be run through this
- * function before insert/update. The public site renders post HTML raw
- * (`set:html` / Eta `<%~ %>`), and that's only safe because the value was
- * sanitized on the way in. Bypassing this is a stored-XSS vulnerability.
+ * IMPORTANT: every rich-HTML field must pass through this before insert/update.
+ * The public site renders post HTML raw (`set:html` / Eta `<%~ %>`), which is
+ * safe ONLY because of this. Bypassing it is stored XSS.
  *
- * Notable exclusions: no `<script>`, no `<iframe>`, no inline event handlers
- * (DOMPurify drops those by default), no `data-*` (we don't use them and
- * they're a common source of CSS/script smuggling).
+ * Excluded on purpose: `<script>`, `<iframe>`, inline event handlers (DOMPurify
+ * defaults), and `data-*` (unused, common CSS/script smuggling vector).
  */
 import DOMPurify from 'isomorphic-dompurify';
 

@@ -1,18 +1,15 @@
 /**
  * Comments — guest discussion attached to published posts.
  *
- * Two invariants this module enforces that every caller relies on:
- *  1. Comment `content` is plain text. We strip every HTML tag (and the
- *     content of <script>/<style> blocks) on the way in. The public template
- *     escapes on render and converts \n to <br>. Do NOT route comments
- *     through `sanitizeHtml()` — that helper allows a rich HTML allowlist
- *     that's appropriate for trusted post bodies, not for guest input.
- *  2. Every new comment lands in `pending`. A moderator (admin/editor) has
- *     to flip status to `approved` before it shows up publicly.
+ * Two enforced invariants:
+ *  1. Comment `content` is plain text — every HTML tag is stripped on the way
+ *     in. Do NOT route it through `sanitizeHtml()`; that allowlist is for
+ *     trusted post bodies, not guest input.
+ *  2. New comments default to `pending`; a moderator must approve before they
+ *     show publicly.
  *
- * Statuses form a simple workflow: pending → approved (visible) | spam
- * (hidden) | trash (hidden, deletable). Hard delete is only used from
- * trash so a misclick never destroys data unrecoverably.
+ * Status workflow: pending → approved (visible) | spam (hidden) | trash
+ * (hidden, deletable). Hard delete happens only from trash.
  */
 import { db, schema } from '../db/client.ts';
 import { eq, and, asc, desc, sql } from 'drizzle-orm';
@@ -22,14 +19,9 @@ import DOMPurify from 'isomorphic-dompurify';
 import type { Comment } from '../db/schema.ts';
 
 /**
- * Zod schema for the public comment form. Trims strings up-front so
- * downstream code doesn't have to think about leading/trailing whitespace.
- *
- * `authorUrl` is normalized: empty string becomes `undefined` (so the DB
- * stores NULL instead of an empty string, and template-side "is there a URL"
- * checks stay simple). Non-empty values must be a real http/https URL —
- * keeping the protocol allowlist tight prevents `javascript:` smuggling
- * if some future template ever forgets to escape an href.
+ * Public comment-form schema. `authorUrl` normalizes empty → undefined (DB
+ * stores NULL) and restricts non-empty values to http/https, blocking
+ * `javascript:` smuggling should a template ever forget to escape an href.
  */
 export const commentFormSchema = z.object({
   postId: z.string().uuid({ message: 'Invalid post.' }),
@@ -40,7 +32,6 @@ export const commentFormSchema = z.object({
     .trim()
     .max(500)
     .optional()
-    // Normalize empty string to undefined so the DB stores NULL.
     .transform((v) => (v && v.length > 0 ? v : undefined))
     .refine(
       (v) => {
@@ -60,33 +51,19 @@ export const commentFormSchema = z.object({
 export type CommentFormInput = z.infer<typeof commentFormSchema>;
 
 /**
- * Strip every HTML tag from `s`, including the *contents* of <script> and
- * <style> blocks (otherwise their text would leak through as visible
- * characters). Also collapse HTML entities back to a safe canonical form so
- * that, for example, `&lt;script&gt;` doesn't survive as encoded markup that
- * a browser might re-interpret if some future template mishandles it.
+ * Reduce `s` to plain text: strip every tag (and the *contents* of
+ * <script>/<style>), then decode common entities.
  *
- * Tag removal is delegated to DOMPurify with an empty allowlist rather than
- * regex passes — a single-pass regex can be tricked by nested/overlapping
- * tags like `<scr<script>ipt>` into reassembling the very markup it removed
- * (CWE-116; CodeQL js/incomplete-multi-character-sanitization). A real HTML
- * parser has no such re-entry problem, and script/style contents are dropped
- * wholesale by DOMPurify's defaults.
- *
- * Comment text is rendered through Eta's autoEscape, so we don't need
- * sophisticated sanitization — the goal here is just to keep the *stored*
- * value plain text, not pseudo-HTML.
+ * Tag removal uses DOMPurify with an empty allowlist rather than regex — a
+ * single-pass regex can be tricked by nested tags like `<scr<script>ipt>` into
+ * reassembling the markup it removed (CWE-116). A real parser can't re-enter.
  */
 function stripHtml(s: string): string {
-  // Empty allowlist → every tag is removed, text content is kept (except
-  // script/style bodies). The result is HTML-encoded text.
   const text = DOMPurify.sanitize(s, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
   return text
-    // Decode the most common HTML entities so they round-trip as plain text.
-    // `&amp;` must be decoded LAST: doing it first turns e.g. `&amp;lt;` into
-    // `&lt;` and then a second pass into `<` — a double-unescape (CWE-116).
-    // DOMPurify emits `&nbsp;` as the literal U+00A0 character, so normalize
-    // both spellings to a plain space.
+    // Decode common entities so they round-trip as plain text. `&amp;` MUST go
+    // last: decoding it first turns `&amp;lt;` → `&lt;` → `<`, a double-unescape
+    // (CWE-116). DOMPurify emits `&nbsp;` as literal U+00A0, so normalize both.
     .replace(/&nbsp;/gi, ' ')
     .replace(/\u00a0/g, ' ')
     .replace(/&lt;/gi, '<')
@@ -100,26 +77,22 @@ type CreateMeta = {
   ipAddress?: string;
   userAgent?: string;
   /**
-   * Effective intake status. Defaults to `pending` so callers that don't care
-   * keep the historical behavior (queue everything). The route layer resolves
-   * the per-post override + site-wide default and passes the result here —
-   * keeping the policy decision out of this module so `createComment` stays a
-   * dumb writer.
+   * Effective intake status, defaulting to `pending`. The route layer resolves
+   * the per-post override + site-wide default; this module just writes it.
    */
   initialStatus?: 'pending' | 'approved';
 };
 
 /**
- * Insert a new comment. Returns the generated id and the recorded status so
- * the caller can branch its success banner ("posted" vs "awaiting moderation").
+ * Insert a new comment. Returns the id and recorded status so the caller can
+ * branch its success banner ("posted" vs "awaiting moderation").
  */
 export async function createComment(
   input: CommentFormInput,
   meta: CreateMeta = {},
 ): Promise<{ id: string; status: 'pending' | 'approved' }> {
   const id = randomUUID();
-  // Strip HTML from content; trim again post-strip in case removed tags
-  // left leading/trailing whitespace.
+  // Trim again post-strip in case removed tags left surrounding whitespace.
   const content = stripHtml(input.content).trim();
   const status = meta.initialStatus ?? 'pending';
   await db.insert(schema.comments).values({
@@ -136,10 +109,7 @@ export async function createComment(
   return { id, status };
 }
 
-/**
- * Approved comments for one post, oldest-first — that's the conventional
- * comment-thread reading order (and matches WordPress's default).
- */
+/** Approved comments for one post, oldest-first (conventional thread order). */
 export async function getApprovedComments(postId: string): Promise<Comment[]> {
   return await db
     .select()
@@ -148,17 +118,13 @@ export async function getApprovedComments(postId: string): Promise<Comment[]> {
     .orderBy(asc(schema.comments.createdAt));
 }
 
-/** Row shape returned by the moderation listing — comment + post title for context. */
+/** Moderation-listing row: comment plus its post title for context. */
 export type ModerationRow = Comment & {
   postTitle: string | null;
   postId: string;
 };
 
-/**
- * Admin moderation listing. If `status` is given, filter to it; otherwise
- * return everything. Newest first so the queue surfaces freshly-submitted
- * spam at the top.
- */
+/** Admin moderation listing, newest first. Filters to `status` when given. */
 export async function getCommentsByStatus(
   status?: 'pending' | 'approved' | 'spam' | 'trash',
 ): Promise<ModerationRow[]> {
@@ -187,10 +153,8 @@ export async function getCommentsByStatus(
 }
 
 /**
- * Per-status counts for the moderation tabs and the sidebar pending badge.
- * Single SQL query rather than four — cheaper and atomic. Statuses that have
- * never been used still appear in the result with a count of 0 thanks to the
- * default-zero merge below.
+ * Per-status counts for the moderation tabs and sidebar badge. One grouped
+ * query; the default-zero merge fills in statuses with no rows.
  */
 export async function getCommentCounts(): Promise<{
   pending: number;
@@ -213,7 +177,7 @@ export async function getCommentCounts(): Promise<{
   return out;
 }
 
-/** Moderator action — flip a comment to a new workflow state. */
+/** Flip a comment to a new workflow state. */
 export async function setCommentStatus(
   id: string,
   status: 'pending' | 'approved' | 'spam' | 'trash',
@@ -221,10 +185,7 @@ export async function setCommentStatus(
   await db.update(schema.comments).set({ status }).where(eq(schema.comments.id, id));
 }
 
-/**
- * Hard delete. Reserved for the trash tab — soft delete (status='trash') is
- * the normal "remove" path so misclicks remain reversible.
- */
+/** Hard delete. Reserved for the trash tab; status='trash' is the reversible path. */
 export async function deleteComment(id: string): Promise<void> {
   await db.delete(schema.comments).where(eq(schema.comments.id, id));
 }

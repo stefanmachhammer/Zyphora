@@ -2,20 +2,10 @@
 /**
  * Installer step 1 — database credentials.
  *
- * The wizard's job here is to make a fresh-checkout operator never need to
- * touch a terminal or hand-edit a `.env` file. They enter host/port/user/
- * password/database name, we open a one-shot pool to verify the credentials
- * work, then write the values to `.env`, patch them into `process.env` in
- * the live server, and trigger a pool rebuild. The next request flows
- * straight into step 2.
- *
- * Failure modes are caught and surfaced inline. We deliberately do NOT
- * write `.env` before the connection test passes — otherwise a typo would
- * lock the operator out, requiring SSH access to repair the file.
- *
- * Already-installed lockout is enforced in middleware, but the GET handler
- * below also bails to /admin if it discovers DB is already configured and
- * usable, just in case someone navigates directly here.
+ * Operator enters host/port/user/password/database; we verify with a one-shot
+ * pool, then write `.env`, patch `process.env`, and rebuild the pool. We do NOT
+ * write `.env` before the connection test passes — a typo would otherwise lock
+ * the operator out and require SSH to repair.
  */
 import '../../styles/admin.css';
 import { testConnection, reloadDbConfig } from '../../db/client.ts';
@@ -24,9 +14,8 @@ import { resetInstallStateCache, getInstallState } from '../../lib/install.ts';
 
 const theme = Astro.cookies.get('zyphora_theme')?.value === 'dark' ? 'dark' : 'light';
 
-// Form-state defaults. We prefill from existing env so a partial install
-// (DB configured but schema not yet applied) doesn't make the operator
-// retype everything. Password is never echoed back, even when present.
+// Prefill from existing env so a partial install doesn't force a retype.
+// Password is never echoed back.
 let host = process.env.DB_HOST ?? 'localhost';
 let port = process.env.DB_PORT ?? '3306';
 let user = process.env.DB_USER ?? '';
@@ -34,6 +23,12 @@ let database = process.env.DB_NAME ?? '';
 let error: string | null = null;
 
 if (Astro.request.method === 'POST') {
+  // Defense-in-depth: never let a POST rewrite `.env` credentials on an
+  // already-installed CMS, even if a request slips past the middleware 404 guard.
+  if ((await getInstallState()) === 'installed') {
+    return Astro.redirect('/admin');
+  }
+
   const form = await Astro.request.formData();
   host = String(form.get('host') ?? '').trim();
   port = String(form.get('port') ?? '3306').trim() || '3306';
@@ -47,16 +42,12 @@ if (Astro.request.method === 'POST') {
   } else if (!Number.isFinite(portNum) || portNum < 1 || portNum > 65535) {
     error = 'Port must be a number between 1 and 65535.';
   } else {
-    // Test connection before persisting anything. mysql2's error messages
-    // are usually specific enough to be useful in the UI ("Access denied
-    // for user X", "Unknown database Y", etc.).
+    // Test before persisting; mysql2's error messages are UI-useful as-is.
     const testError = await testConnection({ host, port: portNum, user, password, database });
     if (testError) {
       error = `Could not connect: ${testError}`;
     } else {
-      // Persist to .env atomically. Only the keys we care about are
-      // touched; any other env entries the operator has already set are
-      // preserved as-is.
+      // Persist only these keys; other existing .env entries are preserved.
       writeEnvVars({
         DB_HOST: host,
         DB_PORT: String(portNum),
@@ -64,8 +55,7 @@ if (Astro.request.method === 'POST') {
         DB_PASS: password,
         DB_NAME: database,
       });
-      // Patch the live process so the next state probe and the next query
-      // both see the new credentials without a restart.
+      // Patch the live process so the next query sees the new credentials without a restart.
       process.env.DB_HOST = host;
       process.env.DB_PORT = String(portNum);
       process.env.DB_USER = user;
@@ -78,8 +68,7 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-// GET-time: if the DB is already configured AND reachable AND the admin
-// exists, no reason to be here.
+// Already fully installed — no reason to be on step 1.
 if (Astro.request.method === 'GET') {
   const state = await getInstallState();
   if (state === 'installed') return Astro.redirect('/admin');

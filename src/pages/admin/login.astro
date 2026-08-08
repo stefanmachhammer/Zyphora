@@ -1,10 +1,7 @@
 ---
 /**
- * Login page — the one `/admin/*` route the middleware lets through
- * unauthenticated. Already-logged-in visitors are bounced straight to /admin.
- *
- * The post-login redirect is locked to paths that start with `/admin` to
- * stop a crafted `?redirect=` from turning this form into an open redirect.
+ * Login page — the one /admin/* route middleware lets through unauthenticated.
+ * The post-login redirect is locked to /admin paths to avoid an open redirect.
  */
 import '../../styles/admin.css';
 import { db, schema } from '../../db/client.ts';
@@ -20,26 +17,21 @@ const redirectTo = Astro.url.searchParams.get('redirect') ?? '/admin';
 const theme = Astro.cookies.get('zyphora_theme')?.value === 'dark' ? 'dark' : 'light';
 
 if (Astro.request.method === 'POST') {
-  // Pull credentials from the form. Email is normalized to lowercase here
-  // (matching how it's stored) so case differences don't break login.
   const form = await Astro.request.formData();
+  // Email normalized to lowercase to match storage.
   const email = String(form.get('email') ?? '').trim().toLowerCase();
   const password = String(form.get('password') ?? '');
 
   if (!email || !password) {
     error = 'Email and password are required.';
   } else {
-    // Fetch the user and verify the password. Use a single generic error
-    // message for both "no such user" and "wrong password" so attackers
-    // can't probe for valid emails.
+    // One generic error for both unknown-email and wrong-password so attackers can't probe emails.
     const rows = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1);
     const user = rows[0];
     if (!user || !(await verifyPassword(user.passwordHash, password))) {
       error = 'Invalid email or password.';
     } else {
-      // Credentials good — issue a session and bounce the user back to
-      // wherever they were trying to go (defaulting to /admin).
-      // Lock redirects to /admin/* paths to avoid open-redirect abuse.
+      // Redirect locked to /admin/* to avoid open-redirect abuse.
       const session = await createSession(user.id);
       setSessionCookie(Astro, session.id, session.expiresAt);
       const safeRedirect = redirectTo.startsWith('/admin') ? redirectTo : '/admin';

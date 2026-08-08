@@ -1,15 +1,10 @@
 /**
- * Static asset endpoint for themes.
+ * Static asset endpoint for themes — serves `themes/<slug>/assets/` at
+ * `/themes/<slug>/<path>`. Only `assets/` is exposed; templates and `theme.json`
+ * stay private.
  *
- * Serves files from `themes/<slug>/assets/` at the URL `/themes/<slug>/<path>`.
- * Only files under the theme's `assets/` directory are exposed — templates,
- * `theme.json`, and any other internals stay private.
- *
- * Path-safety rules:
- *  - the slug must match the same lowercase-alphanumeric pattern the registry
- *    uses (so a malicious URL can't smuggle `..` through the slug)
- *  - the resolved path must stay inside the theme's assets dir (defense
- *    against URL-encoded `..` segments)
+ * Path-safety: slug must match the registry's alphanumeric pattern (no `..` in the
+ * slug), and the resolved target must stay inside the assets dir.
  */
 
 import type { APIRoute } from 'astro';
@@ -54,7 +49,7 @@ export const GET: APIRoute = async ({ params }) => {
   const assetsRoot = resolve(join(THEMES_DIR, theme, 'assets'));
   const target = resolve(join(assetsRoot, path));
 
-  // Defense against `..` segments smuggled through the wildcard.
+  // Reject `..` segments smuggled through the wildcard.
   if (target !== assetsRoot && !target.startsWith(assetsRoot + sep)) return notFound();
   if (!existsSync(target) || !statSync(target).isFile()) return notFound();
 

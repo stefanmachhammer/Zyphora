@@ -1,19 +1,21 @@
 ---
 /**
- * New-post form.
- *
- * On a validation error we re-render with the user's typed values restored,
- * so they don't lose their work. On success we redirect to the edit page
- * (PRG pattern, with `?created=1` so the edit page can show a success banner).
+ * New-post form. On validation error, re-render with typed values restored;
+ * on success, PRG-redirect to the edit page with ?created=1.
  */
 import AdminLayout from '../../../layouts/AdminLayout.astro';
 import TiptapEditor from '../../../components/TiptapEditor.tsx';
 import { postFormSchema, createPost } from '../../../lib/posts.ts';
+import { canCreatePost } from '../../../lib/auth.ts';
+
+// Requires post rights — otherwise any logged-in account could publish straight to the public site.
+if (!canCreatePost(Astro.locals.user)) {
+  return new Response('Forbidden', { status: 403 });
+}
 
 let error: string | null = null;
-// Form-side representation of the tri-state moderation override. The DB stores
-// null/true/false; the form posts these strings so a stale form roundtrip
-// can't lose the distinction between "inherit" and "off."
+// Tri-state moderation override: DB stores null/true/false, the form posts these
+// strings to keep "inherit" (default) distinct from "off" (auto).
 type ModerationChoice = 'default' | 'require' | 'auto';
 const moderationChoiceFromForm = (v: FormDataEntryValue | null): ModerationChoice => {
   const s = String(v ?? 'default');
@@ -25,11 +27,9 @@ let values: { title: string; slug: string; excerpt: string; contentHtml: string;
 };
 
 if (Astro.request.method === 'POST') {
-  // Run the form through the shared zod schema (also used by the edit page)
-  // so validation rules and error messages stay consistent.
+  // Shared zod schema (also used by the edit page) keeps validation consistent.
   const form = await Astro.request.formData();
-  // Unchecked checkboxes don't appear in form data at all, so presence ==
-  // checked. Translate to a real boolean before validation.
+  // Unchecked checkbox is absent from form data, so presence == checked.
   const commentsEnabled = form.get('commentsEnabled') !== null;
   const moderationChoice = moderationChoiceFromForm(form.get('moderation'));
   const parsed = postFormSchema.safeParse({
@@ -44,8 +44,7 @@ if (Astro.request.method === 'POST') {
   });
 
   if (!parsed.success) {
-    // Keep the raw form values around so re-rendering the page restores
-    // what the user typed instead of clearing the form on error.
+    // Preserve typed values so the re-render doesn't clear the form.
     error = parsed.error.issues[0]?.message ?? 'Invalid input';
     const rawCategory = String(form.get('category') ?? 'news');
     values = {
@@ -59,8 +58,6 @@ if (Astro.request.method === 'POST') {
       moderation: moderationChoice,
     };
   } else {
-    // Insert + redirect (PRG). The edit page picks up `?created=1` and
-    // surfaces a success banner.
     const newId = await createPost(parsed.data, Astro.locals.user!.id);
     return Astro.redirect(`/admin/posts/${newId}?created=1`);
   }

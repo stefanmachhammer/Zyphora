@@ -1,17 +1,8 @@
 ---
 /**
- * Comments moderation queue. Tabs across the top filter by status; the
- * default view is "Pending" because that's where moderator attention is
- * actually required.
- *
- * Authorization: admin or editor only — `author` is rejected with a 403.
- * Authors are blocked because the queue exposes every commenter's email
- * and IP across every post in the system, which is broader visibility
- * than an author has reason to see.
- *
- * Actions are per-row form POSTs (Approve / Mark spam / Move to trash /
- * Delete). Delete is hard-delete and only shown from the trash tab so a
- * misclick on the main queue can never destroy data unrecoverably.
+ * Comments moderation queue, filtered by status tab (default: Pending).
+ * Requires moderate_comments — the queue exposes every commenter's email + IP.
+ * Delete is a hard-delete, only exposed from the trash tab.
  */
 import AdminLayout from '../../../layouts/AdminLayout.astro';
 import { canModerateComments } from '../../../lib/auth.ts';
@@ -52,8 +43,7 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-// Tab selection. Default to pending — the queue exists for the unmoderated
-// stuff, so opening straight on it saves a click.
+// Tab selection, defaulting to pending.
 const validStatuses = ['pending', 'approved', 'spam', 'trash', 'all'] as const;
 type StatusTab = (typeof validStatuses)[number];
 const rawStatus = Astro.url.searchParams.get('status') ?? 'pending';
