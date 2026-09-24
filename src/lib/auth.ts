@@ -29,6 +29,7 @@ export const PERMISSION_KEYS = [
   'manage_media',
   'manage_themes',
   'manage_settings',
+  'view_analytics',
 ] as const;
 export type Permission = typeof PERMISSION_KEYS[number];
 
@@ -41,6 +42,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   manage_media: 'Manage media',
   manage_themes: 'Manage themes',
   manage_settings: 'Manage site settings',
+  view_analytics: 'View analytics',
 };
 
 /**
@@ -156,6 +158,15 @@ export function canManageSettings(user: SessionUser | null): boolean {
 
 export function canManageThemes(user: SessionUser | null): boolean {
   return hasPermission(user, 'manage_themes');
+}
+
+/**
+ * Read-only access to the site analytics report (`/admin/analytics`) and the
+ * dashboard's views tile. Separate from `manage_settings` so an editor can see
+ * traffic without being able to switch tracking off or change retention.
+ */
+export function canViewAnalytics(user: SessionUser | null): boolean {
+  return hasPermission(user, 'view_analytics');
 }
 
 /** Either post permission qualifies — a new post's author is always the current user. */

@@ -8,6 +8,13 @@
       "when": 1779993032791,
       "tag": "0000_supreme_shinobi_shaw",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1790271784755,
+      "tag": "0001_rare_archangel",
+      "breakpoints": true
     }
   ]
 }

@@ -11,6 +11,7 @@ import {
   seedSystemRoles,
   createAdminUser,
   seedSiteSettingsIfMissing,
+  seedDefaultSettingsIfMissing,
 } from '../lib/install-ops.ts';
 
 const insertedRoleSlugs = await seedSystemRoles();
@@ -41,6 +42,12 @@ const seededSettings = await seedSiteSettingsIfMissing({
 });
 if (seededSettings) {
   console.log('Default settings created.');
+}
+
+// Feature defaults (analytics, ...) — insert-if-missing, never clobbers edits.
+const seededDefaults = await seedDefaultSettingsIfMissing();
+if (seededDefaults.length > 0) {
+  console.log(`Seeded default setting(s): ${seededDefaults.join(', ')}`);
 }
 
 // Explicit exit — the mysql2 pool keeps the event loop alive otherwise.

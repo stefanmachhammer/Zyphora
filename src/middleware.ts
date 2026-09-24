@@ -1,11 +1,13 @@
 /**
- * Global middleware — runs on every request. Three responsibilities in order:
- * install gate, session resolution, and the `/admin/*` auth gate.
+ * Global middleware — runs on every request. Responsibilities in order:
+ * install gate, session resolution, the `/admin/*` auth gate, and (after the
+ * page has rendered) cookieless page-view recording for public routes.
  * Authorization (role checks) is per-page — this only handles "is anyone logged in?".
  */
 import { defineMiddleware } from 'astro:middleware';
 import { SESSION_COOKIE, getUserBySession, clearSessionCookie } from './lib/auth.ts';
 import { getInstallState } from './lib/install.ts';
+import { shouldTrack, recordPageview, clientIp } from './lib/analytics.ts';
 import './lib/banner.ts';
 // Fire-and-forget check of the GitHub releases API. Opt out with ZYPHORA_NO_UPDATE_CHECK=1.
 import './lib/update-check.ts';
@@ -66,5 +68,46 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
     return ctx.redirect(`/admin/login?redirect=${redirectTo}`);
   }
 
-  return next();
+  // Pre-install there's no DB to write to — render and return as before.
+  if (state !== 'installed') return next();
+
+  const response = await next();
+
+  // ── Analytics ───────────────────────────────────────────────────
+  // Decided after rendering so we see the real status (404s and PRG redirects
+  // don't count) and the page's `trackedPostId`. The insert is deliberately
+  // not awaited: page latency must not depend on the analytics write, and
+  // `recordPageview` never throws. The decision itself is guarded too — an
+  // analytics failure must never turn a rendered page into a 500.
+  try {
+    const headers = ctx.request.headers;
+    const userAgent = headers.get('user-agent') ?? '';
+    const track = await shouldTrack({
+      method: ctx.request.method,
+      path,
+      status: response.status,
+      contentType: response.headers.get('content-type'),
+      userAgent,
+      dnt: headers.get('dnt'),
+      gpc: headers.get('sec-gpc'),
+      purpose: headers.get('sec-purpose') ?? headers.get('purpose'),
+      user: ctx.locals.user,
+    });
+    if (track) {
+      void recordPageview({
+        // Prefer the page's canonical path: `/posts/Foo`, `/posts/foo/` and
+        // `/posts/%66oo` all render the same post and should count as one row.
+        path: ctx.locals.trackedPath ?? path,
+        postId: ctx.locals.trackedPostId ?? null,
+        referer: headers.get('referer'),
+        selfHost: url.hostname,
+        userAgent,
+        ip: clientIp(ctx),
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.warn('[analytics] tracking decision failed:', err instanceof Error ? err.message : err);
+  }
+
+  return response;
 });

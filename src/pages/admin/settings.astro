@@ -1,6 +1,6 @@
 ---
 /**
- * Settings page — site-wide config (title, favicon, spam keys) plus
+ * Settings page — site-wide config (title, favicon, spam keys, analytics) plus
  * self-service password change. Password change verifies the current password
  * first so an unattended session can't lock out the real user.
  */
@@ -9,6 +9,12 @@ import { getSetting, setSetting } from '../../lib/settings.ts';
 import { hashPassword, verifyPassword, canManageSettings } from '../../lib/auth.ts';
 import { saveUpload, deleteUpload, publicUrl } from '../../lib/media.ts';
 import { getRecaptchaConfig } from '../../lib/recaptcha.ts';
+import {
+  clampRetentionDays,
+  invalidateAnalyticsConfig,
+  RETENTION_MIN_DAYS,
+  RETENTION_MAX_DAYS,
+} from '../../lib/analytics.ts';
 import { db, schema } from '../../db/client.ts';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
@@ -90,6 +96,15 @@ if (Astro.request.method === 'POST') {
     await setSetting('recaptcha_site_key', '');
     await setSetting('recaptcha_secret_key', '');
     success = 'Spam protection disabled.';
+  } else if (action === 'analytics') {
+    // Checkboxes round-trip as '1'/'0' like require_comment_moderation above.
+    // Retention is clamped server-side regardless of the input's min/max attrs.
+    await setSetting('analytics_enabled', form.get('analytics_enabled') !== null ? '1' : '0');
+    await setSetting('analytics_exclude_logged_in', form.get('analytics_exclude_logged_in') !== null ? '1' : '0');
+    await setSetting('analytics_retention_days', String(clampRetentionDays(form.get('analytics_retention_days'))));
+    // The tracker caches these for 30 s; make this process pick them up now.
+    invalidateAnalyticsConfig();
+    success = 'Analytics settings saved.';
   } else if (action === 'password') {
     // Cheap checks (length, match) before the expensive Argon2 verify.
     const current = String(form.get('current') ?? '');
@@ -119,6 +134,10 @@ const faviconUrl = await getSetting('favicon_url', '');
 const recaptcha = await getRecaptchaConfig();
 const recaptchaSiteKey = recaptcha.siteKey ?? '';
 const recaptchaSecretConfigured = recaptcha.secretKey !== null;
+// Same fallbacks as lib/analytics.ts so an unseeded install shows the real behavior.
+const analyticsEnabled = (await getSetting('analytics_enabled', '1')) === '1';
+const analyticsExcludeLoggedIn = (await getSetting('analytics_exclude_logged_in', '1')) === '1';
+const analyticsRetentionDays = clampRetentionDays(await getSetting('analytics_retention_days', '365'));
 ---
 <AdminLayout title="Settings">
   <h1>Settings</h1>
@@ -209,6 +228,39 @@ const recaptchaSecretConfigured = recaptcha.secretKey !== null;
         <button type="submit" class="btn danger" style="font-size:0.85rem">Disable & clear keys</button>
       </form>
     )}
+  </div>
+
+  <div class="card" style="margin-bottom:20px">
+    <h2 style="margin-top:0">Analytics</h2>
+    <p style="color:var(--muted);margin-top:0">
+      Counts page views on the homepage and post pages, server-side. No cookies and no tracking script;
+      IP addresses and user-agents are never stored — each visitor is reduced to a salted hash that
+      changes every day, so nobody can be followed across days. Browsers sending
+      <code>DNT: 1</code> or <code>Sec-GPC: 1</code> are not counted. Reports are under
+      <a href="/admin/analytics">Analytics</a>.
+    </p>
+    <form method="POST">
+      <input type="hidden" name="_action" value="analytics" />
+      <div class="field">
+        <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" name="analytics_enabled" checked={analyticsEnabled} />
+          <span>Record page views</span>
+        </label>
+      </div>
+      <div class="field">
+        <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" name="analytics_exclude_logged_in" checked={analyticsExcludeLoggedIn} />
+          <span>Don't count visits from logged-in users</span>
+        </label>
+        <small style="display:block;margin-top:6px;opacity:0.75">Keeps staff previewing their own posts out of the numbers.</small>
+      </div>
+      <div class="field">
+        <label>Keep data for (days)</label>
+        <input class="input" type="number" name="analytics_retention_days" value={analyticsRetentionDays} min={RETENTION_MIN_DAYS} max={RETENTION_MAX_DAYS} step="1" style="max-width:160px" required />
+        <small style="display:block;margin-top:6px;opacity:0.75">Between {RETENTION_MIN_DAYS} and {RETENTION_MAX_DAYS}. Older page views are deleted automatically.</small>
+      </div>
+      <button class="btn" type="submit">Save</button>
+    </form>
   </div>
   )}
 
