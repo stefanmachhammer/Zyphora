@@ -122,6 +122,12 @@ if (Astro.request.method === 'POST') {
   }
 }
 
+// Attribute this view to the post for analytics (read by the middleware after
+// render). Only reached on the render path — 404s and the POST redirect return
+// earlier, and the middleware also ignores non-200 responses.
+Astro.locals.trackedPostId = row.id;
+Astro.locals.trackedPath = `/posts/${row.slug}`;
+
 // Disabling comments hides both the form and previously approved comments.
 const comments = row.commentsEnabled ? await getApprovedComments(row.id) : [];
 const commentSubmittedParam = Astro.url.searchParams.get('comment');

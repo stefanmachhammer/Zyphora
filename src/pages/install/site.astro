@@ -14,6 +14,7 @@ import {
   runMigrations,
   seedSystemRoles,
   seedSiteSettings,
+  seedDefaultSettingsIfMissing,
   createAdminUser,
 } from '../../lib/install-ops.ts';
 import { createSession, setSessionCookie } from '../../lib/auth.ts';
@@ -68,6 +69,7 @@ if (Astro.request.method === 'POST') {
           'An account with that email already exists. Use a different email, or go to the login page if this account is already yours.';
       } else {
         await seedSiteSettings({ title: siteTitle, description: siteDescription });
+        await seedDefaultSettingsIfMissing();
 
         // Auto-login — the operator already controls this server.
         const session = await createSession(admin.id);

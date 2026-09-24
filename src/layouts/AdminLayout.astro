@@ -7,7 +7,7 @@
  * the same permission server-side — that is the actual access control.
  */
 import '../styles/admin.css';
-import { canManageUsers, canManageRoles, canModerateComments, canManageMedia, canManageThemes } from '../lib/auth.ts';
+import { canManageUsers, canManageRoles, canModerateComments, canManageMedia, canManageThemes, canViewAnalytics } from '../lib/auth.ts';
 import { getCommentCounts } from '../lib/comments.ts';
 import { VERSION } from '../lib/version.ts';
 const { user } = Astro.locals;
@@ -54,6 +54,12 @@ const pendingComments = canModerateComments(user) ? (await getCommentCounts()).p
               )}
             </span>
             <span class="nav-label">Comments</span>
+          </a>
+        )}
+        {canViewAnalytics(user) && (
+          <a href="/admin/analytics" class={isActive('/admin/analytics') ? 'active' : ''} title="Analytics">
+            <svg class="nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18"/><path d="M6 20v-6"/><path d="M11 20V8"/><path d="M16 20v-9"/><path d="M21 20V4"/></svg>
+            <span class="nav-label">Analytics</span>
           </a>
         )}
         {canManageMedia(user) && (

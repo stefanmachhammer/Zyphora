@@ -1,0 +1,278 @@
+---
+/**
+ * Analytics report — page views on the public site over the last 7 / 30 / 90
+ * UTC days, compared against the preceding period of equal length. Read-only.
+ *
+ * Data comes from the cookieless tracker in `lib/analytics.ts`. The chart is a
+ * server-rendered inline SVG (no client JS, no chart library); hover detail is
+ * the native SVG `<title>` tooltip.
+ */
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { canViewAnalytics, canManageSettings } from '../../lib/auth.ts';
+import { getAnalyticsSummary, getAnalyticsConfig, type AnalyticsPeriod } from '../../lib/analytics.ts';
+
+if (!canViewAnalytics(Astro.locals.user)) {
+  return new Response('Forbidden', { status: 403 });
+}
+
+// Anything but an exact 7/30/90 falls back to 30 rather than erroring.
+const PERIODS: AnalyticsPeriod[] = [7, 30, 90];
+const requested = Number(Astro.url.searchParams.get('days'));
+const days: AnalyticsPeriod = PERIODS.includes(requested as AnalyticsPeriod) ? (requested as AnalyticsPeriod) : 30;
+
+const config = await getAnalyticsConfig();
+const summary = await getAnalyticsSummary(days);
+const hasData = summary.totalViews > 0 || summary.prevTotalViews > 0;
+const canSettings = canManageSettings(Astro.locals.user);
+
+const fmt = (n: number) => n.toLocaleString('en-US');
+
+interface Delta {
+  label: string;
+  tone: 'up' | 'down' | 'flat';
+  /** Shown after the percentage, e.g. "vs previous 30 days". */
+  suffix: string;
+}
+
+/**
+ * Percentage change vs a comparison value, as a label plus a tone class for
+ * coloring. prev = 0 has no meaningful percentage, so it renders as "—"; the
+ * same applies when retention has pruned part of the comparison window
+ * (`summary.comparable`), since the previous count would be an undercount.
+ */
+function delta(cur: number, prev: number, suffix: string): Delta {
+  if (!summary.comparable || prev === 0) return { label: '—', tone: 'flat', suffix };
+  const pct = Math.round(((cur - prev) / prev) * 100);
+  if (pct === 0) return { label: '0%', tone: 'flat', suffix };
+  return { label: `${pct > 0 ? '+' : ''}${pct}%`, tone: pct > 0 ? 'up' : 'down', suffix };
+}
+
+// Average views/day over the full period (days with zero views included).
+// It's derived from Views, so a delta would just repeat the Views delta.
+const avgPerDay = summary.totalViews / days;
+const fmtAvg = (n: number) => (n >= 10 ? fmt(Math.round(n)) : n.toFixed(1));
+
+// Both comparisons are like-for-like in elapsed time (see AnalyticsSummary):
+// the previous period is trimmed to the same span, and "today" is compared
+// with yesterday up to the same time of day.
+const vsPrev = `vs previous ${days} days`;
+const tiles: { label: string; value: string; delta: Delta | null }[] = [
+  { label: 'Views', value: fmt(summary.totalViews), delta: delta(summary.totalViews, summary.prevTotalViews, vsPrev) },
+  { label: 'Unique visitors', value: fmt(summary.uniqueVisitors), delta: delta(summary.uniqueVisitors, summary.prevUniqueVisitors, vsPrev) },
+  { label: 'Views today', value: fmt(summary.viewsToday), delta: delta(summary.viewsToday, summary.viewsYesterdaySameTime, 'vs yesterday at this time') },
+  { label: 'Avg views / day', value: fmtAvg(avgPerDay), delta: null },
+];
+
+// ── Chart geometry ───────────────────────────────────────────────────
+// All coordinates are viewBox units; the SVG scales to its container width.
+const W = 720;
+const H = 240;
+const M = { top: 12, right: 8, bottom: 26, left: 40 };
+const plotW = W - M.left - M.right;
+const plotH = H - M.top - M.bottom;
+
+/**
+ * Round a raw axis step up to 1/2/5 × 10^n so tick labels are human numbers.
+ * The y-axis gets four intervals; a series of zeros still yields a 0..4 axis.
+ */
+function niceStep(raw: number): number {
+  if (raw <= 1) return 1;
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const f = raw / pow;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow;
+}
+const maxViews = Math.max(0, ...summary.perDay.map((d) => d.views));
+const step = niceStep(maxViews / 4);
+const yMax = Math.max(step * 4, step * Math.ceil(maxViews / step));
+const ticks = Array.from({ length: Math.round(yMax / step) + 1 }, (_, i) => i * step);
+const y = (v: number) => M.top + plotH - (v / yMax) * plotH;
+
+// One slot per day; the bar takes ~70% of it so neighbouring bars keep a gap.
+const slot = plotW / days;
+const barW = Math.max(1, slot * 0.7);
+// Label every Nth day, anchored so today (the last bar) is always labeled.
+const labelEvery = days === 7 ? 1 : days === 30 ? 5 : 15;
+const dayLabel = (key: string) =>
+  new Date(`${key}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+/**
+ * Bar path with rounded top corners only — the data end is rounded, the
+ * baseline end stays square so bars sit flush on the axis.
+ */
+function barPath(x: number, top: number, w: number, h: number): string {
+  const r = Math.min(3, w / 2, h);
+  const bottom = top + h;
+  return `M${x},${bottom}V${top + r}Q${x},${top} ${x + r},${top}H${x + w - r}Q${x + w},${top} ${x + w},${top + r}V${bottom}Z`;
+}
+
+const bars = summary.perDay.map((d, i) => {
+  const slotX = M.left + i * slot;
+  const h = (d.views / yMax) * plotH;
+  return {
+    ...d,
+    slotX,
+    path: h > 0 ? barPath(slotX + (slot - barW) / 2, M.top + plotH - h, barW, h) : null,
+    label: (days - 1 - i) % labelEvery === 0 ? dayLabel(d.date) : null,
+    cx: slotX + slot / 2,
+  };
+});
+
+const peak = summary.perDay.reduce((best, d) => (d.views > best.views ? d : best), summary.perDay[0]);
+const chartLabel =
+  `Views per day for the last ${days} days: ${fmt(summary.totalViews)} views in total` +
+  (peak && peak.views > 0 ? `, peaking at ${fmt(peak.views)} on ${peak.date}.` : '.');
+
+// Device share as percentages of the period's views.
+const deviceTotal = summary.devices.reduce((n, d) => n + d.views, 0);
+const deviceLabel: Record<string, string> = { desktop: 'Desktop', mobile: 'Mobile', tablet: 'Tablet' };
+---
+<AdminLayout title="Analytics">
+  <div class="toolbar">
+    <h1 style="margin:0">Analytics</h1>
+    <nav class="analytics-periods" aria-label="Report period">
+      {PERIODS.map((p) => (
+        <a
+          href={`/admin/analytics?days=${p}`}
+          class={`btn ${p === days ? '' : 'secondary'}`}
+          aria-current={p === days ? 'page' : undefined}
+        >
+          {p} days
+        </a>
+      ))}
+    </nav>
+  </div>
+
+  {!config.enabled && (
+    <div class="card analytics-note">
+      <strong>Analytics is turned off.</strong> No new page views are being recorded.
+      {canSettings ? (
+        <span> Turn it back on in <a href="/admin/settings">Settings → Analytics</a>.</span>
+      ) : (
+        <span> Ask an administrator to enable it in Settings.</span>
+      )}
+    </div>
+  )}
+
+  {!hasData ? (
+    <div class="card analytics-empty">
+      <p style="margin:0 0 6px;font-weight:600">No page views recorded yet.</p>
+      <p style="margin:0;color:var(--muted)">
+        Views of the homepage and published posts will show up here. Logged-in visits
+        {config.excludeLoggedIn ? ' are excluded, so open the site in a private window to test.' : ' are counted.'}
+      </p>
+    </div>
+  ) : (
+    <>
+      <div class="analytics-tiles">
+        {tiles.map((t) => (
+          <div class="card">
+            <div class="analytics-tile-label">{t.label}</div>
+            <div class="analytics-tile-value">{t.value}</div>
+            {t.delta ? (
+              <div class={`analytics-delta ${t.delta.tone}`}>
+                {t.delta.label} <span>{t.delta.suffix}</span>
+              </div>
+            ) : (
+              <div class="analytics-delta flat"><span>over {days} days</span></div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div class="card analytics-chart-card">
+        <h2 style="margin-top:0">Views per day</h2>
+        <svg class="analytics-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={chartLabel}>
+          {/* Gridlines + y-axis tick labels (recessive: border/muted tokens). */}
+          {ticks.map((t) => (
+            <g>
+              <line class="grid" x1={M.left} x2={W - M.right} y1={y(t)} y2={y(t)} />
+              <text class="axis" x={M.left - 6} y={y(t)} dy="0.32em" text-anchor="end">{fmt(t)}</text>
+            </g>
+          ))}
+          {/* One group per day: a full-height transparent hit area so the
+              native tooltip works even on short/zero bars, plus the bar. */}
+          {bars.map((b) => (
+            <g class="bar">
+              <title>{`${b.date}: ${fmt(b.views)} views · ${fmt(b.visitors)} visitors`}</title>
+              <rect class="hit" x={b.slotX} y={M.top} width={slot} height={plotH} />
+              {b.path && <path d={b.path} />}
+              {b.label && (
+                <text class="axis" x={b.cx} y={H - 8} text-anchor="middle">{b.label}</text>
+              )}
+            </g>
+          ))}
+          <line class="baseline" x1={M.left} x2={W - M.right} y1={M.top + plotH} y2={M.top + plotH} />
+        </svg>
+      </div>
+
+      <div class="analytics-tables">
+        <div>
+          <h2>Top pages</h2>
+          {summary.topPages.length === 0 ? (
+            <div class="card analytics-muted">No views in this period.</div>
+          ) : (
+            <table>
+              <thead><tr><th>Page</th><th class="num">Views</th></tr></thead>
+              <tbody>
+                {summary.topPages.map((p) => (
+                  <tr>
+                    <td>
+                      {/* Paths are only ever `/` or `/posts/<slug>` (see isTrackablePath). */}
+                      <a href={p.path} target="_blank" rel="noopener">{p.path}</a>
+                      {p.title && <div class="analytics-sub">{p.title}</div>}
+                      {!p.title && p.path === '/' && <div class="analytics-sub">Homepage</div>}
+                    </td>
+                    <td class="num">{fmt(p.views)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div>
+          <h2>Top referrers</h2>
+          {summary.topReferrers.length === 0 ? (
+            <div class="card analytics-muted">No views in this period.</div>
+          ) : (
+            <table>
+              <thead><tr><th>Source</th><th class="num">Views</th></tr></thead>
+              <tbody>
+                {summary.topReferrers.map((r) => (
+                  <tr>
+                    <td>{r.host ?? <span class="analytics-muted">Direct / none</span>}</td>
+                    <td class="num">{fmt(r.views)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {deviceTotal > 0 && (
+        <div class="card analytics-devices">
+          <h2 style="margin-top:0">Devices</h2>
+          <ul>
+            {summary.devices.map((d) => {
+              const pct = Math.round((d.views / deviceTotal) * 100);
+              return (
+                <li>
+                  <span class="analytics-device-name">{deviceLabel[d.device] ?? d.device}</span>
+                  <span class="analytics-device-track" aria-hidden="true">
+                    <span class="analytics-device-fill" style={`width:${pct}%`}></span>
+                  </span>
+                  <span class="analytics-device-value">{pct}% · {fmt(d.views)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      <p class="analytics-footnote">
+        Days are UTC. Unique visitors are counted per day — the anonymous visitor hash
+        changes daily, so someone visiting on three days counts three times.
+      </p>
+    </>
+  )}
+</AdminLayout>

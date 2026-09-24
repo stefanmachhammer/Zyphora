@@ -9,5 +9,16 @@ declare namespace App {
   interface Locals {
     user: import('./lib/auth.ts').SessionUser | null;
     sessionId: string | null;
+    /**
+     * Set by `/posts/[slug]` on a successful render so the analytics
+     * middleware can attribute the page view to a post id (unset elsewhere).
+     */
+    trackedPostId?: string | null;
+    /**
+     * Canonical public path for the rendered page (e.g. `/posts/<slug>` from
+     * the stored slug) so case/encoding/trailing-slash variants of one URL
+     * aggregate as a single row in the analytics report.
+     */
+    trackedPath?: string;
   }
 }

@@ -10,7 +10,7 @@ import { db, schema } from '../db/client.ts';
 import { migrate as drizzleMigrate } from 'drizzle-orm/mysql2/migrator';
 import { hash } from '@node-rs/argon2';
 import { randomUUID } from 'node:crypto';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { resolve } from 'node:path';
 import { setSetting } from './settings.ts';
 
@@ -35,12 +35,15 @@ export const SYSTEM_ROLES: ReadonlyArray<{
       'manage_media',
       'manage_themes',
       'manage_settings',
+      'view_analytics',
     ],
   },
   {
     slug: 'editor',
     name: 'Editor',
-    permissions: ['manage_posts_any', 'manage_posts_own', 'manage_media'],
+    // Existing installs receive `view_analytics` via migration 0001 instead
+    // (seedSystemRoles never rewrites roles that already exist).
+    permissions: ['manage_posts_any', 'manage_posts_own', 'manage_media', 'view_analytics'],
   },
   {
     slug: 'author',
@@ -114,6 +117,45 @@ export async function seedSiteSettingsIfMissing(input: {
     { key: 'site_description', value: input.description },
   ]);
   return true;
+}
+
+/**
+ * Defaults for settings that aren't collected by the installer form. Every
+ * reader also passes the same value as its `getSetting` fallback, so seeding
+ * them is about making the stored config explicit (and visible in db:studio),
+ * not about correctness.
+ */
+export const DEFAULT_SETTINGS: Readonly<Record<string, string>> = {
+  // Cookieless page-view analytics (see lib/analytics.ts). On by default;
+  // staff browsing is excluded; one year of raw rows retained.
+  analytics_enabled: '1',
+  analytics_exclude_logged_in: '1',
+  analytics_retention_days: '365',
+};
+
+/**
+ * Insert any `DEFAULT_SETTINGS` keys that don't exist yet. Never overwrites an
+ * existing row, so it is safe on every installer POST and every `db:seed` run.
+ * Returns the keys actually inserted.
+ *
+ * The select is only for the return value; the insert itself is made race-safe
+ * with an ON DUPLICATE KEY no-op, so a double-submitted installer form (or
+ * `db:seed` running alongside it) can't fail on a duplicate key.
+ */
+export async function seedDefaultSettingsIfMissing(): Promise<string[]> {
+  const keys = Object.keys(DEFAULT_SETTINGS);
+  const existing = await db
+    .select({ key: schema.settings.key })
+    .from(schema.settings)
+    .where(inArray(schema.settings.key, keys));
+  const present = new Set(existing.map((r) => r.key));
+  const toInsert = keys.filter((k) => !present.has(k));
+  if (toInsert.length === 0) return [];
+  await db
+    .insert(schema.settings)
+    .values(toInsert.map((key) => ({ key, value: DEFAULT_SETTINGS[key] })))
+    .onDuplicateKeyUpdate({ set: { key: sql`${schema.settings.key}` } });
+  return toInsert;
 }
 
 export interface CreatedAdmin {

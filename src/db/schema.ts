@@ -7,7 +7,7 @@
  * 254 (RFC 5321 cap). utf8mb4 is set at the connection level (see `db/client.ts`),
  * so emoji / non-BMP characters round-trip without per-column overrides.
  */
-import { mysqlTable, varchar, text, mediumtext, int, boolean, timestamp, json } from 'drizzle-orm/mysql-core';
+import { mysqlTable, varchar, char, text, mediumtext, int, boolean, timestamp, json, index } from 'drizzle-orm/mysql-core';
 
 // `role` is a slug into `roles` (not an enum, so admins can define custom
 // roles); validity is enforced in the app layer, no hard FK by design.
@@ -112,6 +112,35 @@ export const comments = mysqlTable('comments', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
+// Cookieless page-view log written by lib/analytics.ts from the middleware.
+// Deliberately holds no raw IP or user-agent: `visitorHash` is a salted SHA-256
+// of (salt, UTC day, IP, UA) so the same browser is countable as "unique" within
+// one day but can't be linked across days or reversed to an address. `postId`
+// is `set null` on post delete so historical totals survive content cleanup.
+// Rows older than the `analytics_retention_days` setting are pruned lazily.
+export const pageviews = mysqlTable(
+  'pageviews',
+  {
+    id: varchar('id', { length: 36 }).primaryKey(),
+    path: varchar('path', { length: 500 }).notNull(),
+    postId: varchar('post_id', { length: 36 }).references(() => posts.id, { onDelete: 'set null' }),
+    // Hostname only (no path/query, which can carry tokens); null = direct/same-site.
+    referrerHost: varchar('referrer_host', { length: 255 }),
+    visitorHash: char('visitor_hash', { length: 64 }).notNull(),
+    device: varchar('device', { length: 16, enum: ['desktop', 'mobile', 'tablet'] }).notNull(),
+    // No DB default on purpose: MySQL's now() uses the *session* time zone
+    // while Drizzle writes/reads UTC wall-clock, so a defaulted row would be
+    // offset by the server's UTC offset. lib/analytics.ts always sets it.
+    createdAt: timestamp('created_at').notNull(),
+  },
+  (t) => [
+    // Every report query range-scans on created_at; post_id backs the FK and
+    // per-post lookups.
+    index('pageviews_created_at_idx').on(t.createdAt),
+    index('pageviews_post_id_idx').on(t.postId),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -124,3 +153,5 @@ export type Role = typeof roles.$inferSelect;
 export type NewRole = typeof roles.$inferInsert;
 export type Comment = typeof comments.$inferSelect;
 export type NewComment = typeof comments.$inferInsert;
+export type Pageview = typeof pageviews.$inferSelect;
+export type NewPageview = typeof pageviews.$inferInsert;

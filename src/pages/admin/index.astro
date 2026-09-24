@@ -1,12 +1,14 @@
 ---
 /**
  * Admin dashboard — aggregate counts + five most-recently-touched posts.
- * Read-only.
+ * Read-only. Users with `view_analytics` also get a 7-day page-view tile
+ * (only while analytics is enabled) linking to the full report.
  */
 import AdminLayout from '../../layouts/AdminLayout.astro';
 import { db, schema } from '../../db/client.ts';
 import { eq, desc, sql } from 'drizzle-orm';
-import { hasAnyPermission } from '../../lib/auth.ts';
+import { hasAnyPermission, canViewAnalytics } from '../../lib/auth.ts';
+import { countRecentViews, getAnalyticsConfig } from '../../lib/analytics.ts';
 
 // Staff-only view (drafts included) — permission-less subscribers get 403.
 if (!hasAnyPermission(Astro.locals.user)) {
@@ -26,16 +28,24 @@ const publishedPosts = Number(publishedPostsRows[0]?.count ?? 0);
 const totalUsers = Number(totalUsersRows[0]?.count ?? 0);
 const totalMedia = Number(totalMediaRows[0]?.count ?? 0);
 
+// Single COUNT over the created_at index — cheaper than the full report summary.
+const showViews = canViewAnalytics(Astro.locals.user) && (await getAnalyticsConfig()).enabled;
+const views7d = showViews ? await countRecentViews(7) : 0;
+
 const recent = await db.select().from(schema.posts).orderBy(desc(schema.posts.updatedAt)).limit(5);
 ---
 <AdminLayout title="Dashboard">
   <h1>Welcome back, {Astro.locals.user?.displayName}</h1>
 
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px;">
+  {/* auto-fit grid (admin.css) so an optional fifth tile wraps cleanly. */}
+  <div class="dashboard-tiles" style="margin-bottom:28px;">
     <div class="card"><div style="color:var(--muted);font-size:0.8rem;text-transform:uppercase">Posts</div><div style="font-size:1.6rem;font-weight:700">{totalPosts}</div></div>
     <div class="card"><div style="color:var(--muted);font-size:0.8rem;text-transform:uppercase">Published</div><div style="font-size:1.6rem;font-weight:700">{publishedPosts}</div></div>
     <div class="card"><div style="color:var(--muted);font-size:0.8rem;text-transform:uppercase">Media</div><div style="font-size:1.6rem;font-weight:700">{totalMedia}</div></div>
     <div class="card"><div style="color:var(--muted);font-size:0.8rem;text-transform:uppercase">Users</div><div style="font-size:1.6rem;font-weight:700">{totalUsers}</div></div>
+    {showViews && (
+      <a class="card" href="/admin/analytics?days=7" style="text-decoration:none;color:inherit"><div style="color:var(--muted);font-size:0.8rem;text-transform:uppercase">Views (7d)</div><div style="font-size:1.6rem;font-weight:700">{views7d.toLocaleString('en-US')}</div></a>
+    )}
   </div>
 
   <h2>Recent posts</h2>

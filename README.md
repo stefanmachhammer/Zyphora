@@ -25,6 +25,7 @@ A self-hosted CMS built on Astro. SSR public site, admin panel at `/admin`, MySQ
 ### Admin UI
 - **Collapsible sidebar** — full or rail mode, persisted per-user via cookie
 - **View site** — one-click open of the public site in a new tab
+- **Analytics** — cookieless, server-side page-view stats with a views-per-day chart, top pages, referrers, and device split (see [Analytics](#analytics))
 - Form-POST mutations throughout — works without JavaScript, plays nicely with progressive enhancement
 
 ### Themes
@@ -168,6 +169,31 @@ Templates render against a typed `RenderContext` (see `src/lib/themes/types.ts`)
 
 To install a third-party theme, zip the folder so `theme.json` is at the top level (or under a single wrapper directory) and upload from **Admin → Themes**. Zip-slip and zip-bomb guards apply (5 MB compressed / 25 MB uncompressed).
 
+## Analytics
+
+Zyphora counts page views on the public site itself — no third-party script, no client-side tracker, no cookies. The report lives at **Admin → Analytics** (7 / 30 / 90-day views, unique visitors, views per day, top pages, top referrers, devices) and a 7-day views tile appears on the dashboard. Admins and editors get the `view_analytics` permission by default; grant it to other roles from **Admin → Roles**.
+
+**What's recorded**, per view of `/` or a published post (`/posts/<slug>`) that renders successfully:
+
+- the path (and the post it belongs to)
+- the referring **hostname** only — never the full URL, which can carry search terms or tokens; same-site navigation counts as direct
+- a coarse device class (desktop / mobile / tablet)
+- a visitor hash: SHA-256 of a per-site secret salt, the current UTC date, the IP address, and the user-agent
+
+**What's not recorded:** IP addresses, user-agents, cookies, or anything that links a visitor across days. The date in the hash means the same person gets an unrelated hash tomorrow, so "unique visitors" is counted per day (someone visiting on three days counts three times). Bots and link-preview fetchers are skipped by user-agent, and browsers sending `DNT: 1` or `Sec-GPC: 1` are not counted at all.
+
+**Settings** (**Admin → Settings → Analytics**):
+
+| Setting                          | Default | Description                                                  |
+| -------------------------------- | ------- | ------------------------------------------------------------ |
+| Record page views                | on      | Master switch. Off stops recording; existing data stays viewable |
+| Don't count logged-in users      | on      | Keeps staff previewing their own posts out of the numbers    |
+| Keep data for (days)             | `365`   | 30–3650. Older rows are deleted automatically (checked hourly) |
+
+To disable analytics entirely, untick **Record page views**. To wipe what's been collected, `TRUNCATE TABLE pageviews;`.
+
+Behind a reverse proxy, make sure it sets `X-Forwarded-For` — the first address is used (only as hash input) so visitors aren't all collapsed into the proxy's IP.
+
 ## Production
 
 ```sh
@@ -184,7 +210,6 @@ Sessions currently live in MySQL alongside everything else. The app server itsel
 Major work on deck:
 
 - **Plugins** — uploadable plugin system on top of the existing hooks registry. Themes will stay runtime-template-only; plugins get their own threat model and a clear extension API.
-- **Analytics** — built-in, privacy-first pageview tracking with a top-posts dashboard, referrer breakdown, and per-post stats. No third-party cookies.
 - **Email** — outbound SMTP for transactional notifications (new comment, password reset, mentions) and an admin section for templates and delivery logs.
 - **Default theme** — keep iterating: pagination, tags, author pages, archives by category, OG/Twitter card metadata.
 
