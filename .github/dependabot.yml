@@ -16,8 +16,6 @@ updates:
         update-types:
           - minor
           - patch
-    commit-message:
-      prefix: "Bump"
 
   # Actions used in .github/workflows
   - package-ecosystem: github-actions
@@ -27,5 +25,3 @@ updates:
       day: monday
       time: "06:00"
       timezone: Europe/Vienna
-    commit-message:
-      prefix: "Bump"
