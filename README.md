@@ -48,7 +48,7 @@ A self-hosted CMS built on Astro. SSR public site, admin panel at `/admin`, MySQ
 
 ## Requirements
 
-- Node `>=22.12.0`
+- Node `>=22.22.2`
 - MySQL 8+ (any flavor: MySQL Community Edition, MariaDB, Amazon RDS, PlanetScale via the standard driver, etc.)
 
 ## Quick start
