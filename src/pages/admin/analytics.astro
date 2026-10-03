@@ -1,12 +1,4 @@
 ---
-/**
- * Analytics report — page views on the public site over the last 7 / 30 / 90
- * UTC days, compared against the preceding period of equal length. Read-only.
- *
- * Data comes from the cookieless tracker in `lib/analytics.ts`. The chart is a
- * server-rendered inline SVG (no client JS, no chart library); hover detail is
- * the native SVG `<title>` tooltip.
- */
 import AdminLayout from '../../layouts/AdminLayout.astro';
 import { canViewAnalytics, canManageSettings } from '../../lib/auth.ts';
 import { getAnalyticsSummary, getAnalyticsConfig, type AnalyticsPeriod } from '../../lib/analytics.ts';
@@ -15,7 +7,6 @@ if (!canViewAnalytics(Astro.locals.user)) {
   return new Response('Forbidden', { status: 403 });
 }
 
-// Anything but an exact 7/30/90 falls back to 30 rather than erroring.
 const PERIODS: AnalyticsPeriod[] = [7, 30, 90];
 const requested = Number(Astro.url.searchParams.get('days'));
 const days: AnalyticsPeriod = PERIODS.includes(requested as AnalyticsPeriod) ? (requested as AnalyticsPeriod) : 30;
@@ -30,16 +21,10 @@ const fmt = (n: number) => n.toLocaleString('en-US');
 interface Delta {
   label: string;
   tone: 'up' | 'down' | 'flat';
-  /** Shown after the percentage, e.g. "vs previous 30 days". */
   suffix: string;
 }
 
-/**
- * Percentage change vs a comparison value, as a label plus a tone class for
- * coloring. prev = 0 has no meaningful percentage, so it renders as "—"; the
- * same applies when retention has pruned part of the comparison window
- * (`summary.comparable`), since the previous count would be an undercount.
- */
+// No meaningful % when prev is 0 or retention has pruned part of the comparison window.
 function delta(cur: number, prev: number, suffix: string): Delta {
   if (!summary.comparable || prev === 0) return { label: '—', tone: 'flat', suffix };
   const pct = Math.round(((cur - prev) / prev) * 100);
@@ -47,14 +32,9 @@ function delta(cur: number, prev: number, suffix: string): Delta {
   return { label: `${pct > 0 ? '+' : ''}${pct}%`, tone: pct > 0 ? 'up' : 'down', suffix };
 }
 
-// Average views/day over the full period (days with zero views included).
-// It's derived from Views, so a delta would just repeat the Views delta.
 const avgPerDay = summary.totalViews / days;
 const fmtAvg = (n: number) => (n >= 10 ? fmt(Math.round(n)) : n.toFixed(1));
 
-// Both comparisons are like-for-like in elapsed time (see AnalyticsSummary):
-// the previous period is trimmed to the same span, and "today" is compared
-// with yesterday up to the same time of day.
 const vsPrev = `vs previous ${days} days`;
 const tiles: { label: string; value: string; delta: Delta | null }[] = [
   { label: 'Views', value: fmt(summary.totalViews), delta: delta(summary.totalViews, summary.prevTotalViews, vsPrev) },
@@ -63,18 +43,13 @@ const tiles: { label: string; value: string; delta: Delta | null }[] = [
   { label: 'Avg views / day', value: fmtAvg(avgPerDay), delta: null },
 ];
 
-// ── Chart geometry ───────────────────────────────────────────────────
-// All coordinates are viewBox units; the SVG scales to its container width.
 const W = 720;
 const H = 240;
 const M = { top: 12, right: 8, bottom: 26, left: 40 };
 const plotW = W - M.left - M.right;
 const plotH = H - M.top - M.bottom;
 
-/**
- * Round a raw axis step up to 1/2/5 × 10^n so tick labels are human numbers.
- * The y-axis gets four intervals; a series of zeros still yields a 0..4 axis.
- */
+// Round a raw axis step up to 1/2/5 × 10^n so tick labels are human numbers.
 function niceStep(raw: number): number {
   if (raw <= 1) return 1;
   const pow = 10 ** Math.floor(Math.log10(raw));
@@ -87,7 +62,6 @@ const yMax = Math.max(step * 4, step * Math.ceil(maxViews / step));
 const ticks = Array.from({ length: Math.round(yMax / step) + 1 }, (_, i) => i * step);
 const y = (v: number) => M.top + plotH - (v / yMax) * plotH;
 
-// One slot per day; the bar takes ~70% of it so neighbouring bars keep a gap.
 const slot = plotW / days;
 const barW = Math.max(1, slot * 0.7);
 // Label every Nth day, anchored so today (the last bar) is always labeled.
@@ -95,10 +69,7 @@ const labelEvery = days === 7 ? 1 : days === 30 ? 5 : 15;
 const dayLabel = (key: string) =>
   new Date(`${key}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 
-/**
- * Bar path with rounded top corners only — the data end is rounded, the
- * baseline end stays square so bars sit flush on the axis.
- */
+// Rounded top corners only; the baseline end stays square.
 function barPath(x: number, top: number, w: number, h: number): string {
   const r = Math.min(3, w / 2, h);
   const bottom = top + h;
@@ -122,7 +93,6 @@ const chartLabel =
   `Views per day for the last ${days} days: ${fmt(summary.totalViews)} views in total` +
   (peak && peak.views > 0 ? `, peaking at ${fmt(peak.views)} on ${peak.date}.` : '.');
 
-// Device share as percentages of the period's views.
 const deviceTotal = summary.devices.reduce((n, d) => n + d.views, 0);
 const deviceLabel: Record<string, string> = { desktop: 'Desktop', mobile: 'Mobile', tablet: 'Tablet' };
 ---
@@ -182,15 +152,13 @@ const deviceLabel: Record<string, string> = { desktop: 'Desktop', mobile: 'Mobil
       <div class="card analytics-chart-card">
         <h2 style="margin-top:0">Views per day</h2>
         <svg class="analytics-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={chartLabel}>
-          {/* Gridlines + y-axis tick labels (recessive: border/muted tokens). */}
           {ticks.map((t) => (
             <g>
               <line class="grid" x1={M.left} x2={W - M.right} y1={y(t)} y2={y(t)} />
               <text class="axis" x={M.left - 6} y={y(t)} dy="0.32em" text-anchor="end">{fmt(t)}</text>
             </g>
           ))}
-          {/* One group per day: a full-height transparent hit area so the
-              native tooltip works even on short/zero bars, plus the bar. */}
+          {/* Full-height transparent hit area so the native tooltip works on short/zero bars. */}
           {bars.map((b) => (
             <g class="bar">
               <title>{`${b.date}: ${fmt(b.views)} views · ${fmt(b.visitors)} visitors`}</title>

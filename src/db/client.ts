@@ -1,21 +1,5 @@
-/**
- * Database client — lazy MySQL connection pool shared across the app.
- *
- * Settings come from DB_HOST / DB_PORT (default 3306) / DB_USER / DB_PASS /
- * DB_NAME; no `DATABASE_URL` form, to avoid leaking a full DSN into logs.
- *
- * This module does NOT fail fast on missing env vars: a fresh checkout with no
- * `.env` must still boot so the web installer (`/install`) can collect
- * credentials, write `.env`, and reload the pool. The `db` proxy below throws
- * a clear error only when the first query runs before config is in place.
- *
- * `.env` is loaded as a side-effect import so its keys are in `process.env`
- * before we read them. Charset is pinned to utf8mb4 so 4-byte characters
- * (emoji) round-trip — MySQL's "utf8" alias is the 3-byte form and corrupts them.
- *
- * mysql2 query builders are async: `await db.select()...where()` resolves to a
- * row array. Use `(await ...limit(1))[0]` for "first or undefined" reads.
- */
+// Must NOT fail fast on missing env vars: a fresh checkout has no `.env` and
+// must still boot so the web installer can write one and `reloadDbConfig()`.
 import '../lib/env-file.ts';
 import { createPool, type Pool } from 'mysql2/promise';
 import { drizzle, type MySql2Database } from 'drizzle-orm/mysql2';
@@ -23,15 +7,9 @@ import * as schema from './schema.ts';
 
 type DbInstance = MySql2Database<typeof schema>;
 
-// Populated on first use, cleared by `reloadDbConfig()` so the installer can
-// switch credentials without restarting the Node process.
 let activePool: Pool | null = null;
 let activeDb: DbInstance | null = null;
 
-/**
- * Read the four required env vars, throwing a single error that lists all
- * missing names at once (not one at a time).
- */
 function readDbConfig() {
   const host = process.env.DB_HOST;
   const user = process.env.DB_USER;
@@ -53,11 +31,6 @@ function readDbConfig() {
   return { host: host!, port, user: user!, password: password!, database: database! };
 }
 
-/**
- * Build a fresh pool from current env config (called lazily — see `db` below).
- * connectionLimit stays conservative: a large pool just lets one slow query
- * starve the lot under the Node adapter's own request concurrency.
- */
 function buildPool(): Pool {
   const cfg = readDbConfig();
   return createPool({
@@ -66,35 +39,23 @@ function buildPool(): Pool {
     user: cfg.user,
     password: cfg.password,
     database: cfg.database,
+    // MySQL's "utf8" is the 3-byte form and corrupts emoji; utf8mb4 is required.
     charset: 'utf8mb4',
     connectionLimit: 10,
-    // Decode DATE/DATETIME/TIMESTAMP as JS Date for Drizzle's `timestamp`
-    // columns. Explicit to guard against a future driver default change.
     dateStrings: false,
   });
 }
 
-/**
- * Resolve the current Drizzle binding, building the pool on first use. Callers
- * normally go through the `db` proxy; exported so the installer's connection
- * test can force initialization in a controlled spot.
- */
 export function getDb(): DbInstance {
   if (!activeDb) {
     activePool = buildPool();
-    // `mode: 'default'` for standard MySQL; `'planetscale'` is only for
-    // serverless backends without cross-table foreign keys.
     activeDb = drizzle(activePool, { schema, mode: 'default' });
   }
   return activeDb;
 }
 
-/**
- * Proxy that forwards every access to the lazily-built Drizzle instance, so
- * call sites can `import { db }` and write `db.select()...` as if it were eager;
- * the first method call triggers `getDb()`. Functions are bound to the instance
- * so Drizzle's `this`-using fluent API survives destructuring via the proxy.
- */
+// Methods are bound to the instance: Drizzle's fluent API relies on `this`,
+// which the Proxy would otherwise lose.
 export const db = new Proxy({} as DbInstance, {
   get(_target, prop) {
     const instance = getDb();
@@ -106,17 +67,10 @@ export const db = new Proxy({} as DbInstance, {
   },
 }) as DbInstance;
 
-/** True iff all four required DB_* env vars are present and non-empty. */
 export function isDbConfigured(): boolean {
   return Boolean(process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASS && process.env.DB_NAME);
 }
 
-/**
- * Drop the cached pool so the next query rebuilds against current env config.
- * Used by the installer after it writes new credentials. `pool.end()` is
- * best-effort — references are cleared regardless so the rebuild is clean;
- * worst case is one leaked connection the process lifecycle reaps.
- */
 export async function reloadDbConfig(): Promise<void> {
   const pool = activePool;
   activePool = null;
@@ -124,18 +78,10 @@ export async function reloadDbConfig(): Promise<void> {
   if (pool) {
     try {
       await pool.end();
-    } catch {
-      // ignored — see comment above
-    }
+    } catch {}
   }
 }
 
-/**
- * Open a one-shot pool, run `SELECT 1`, close it. Returns null on success or a
- * human-readable error string on failure. The installer uses this to validate
- * credentials *before* writing them to `.env`, so a typo can't lock the
- * operator out. The message is surfaced verbatim in the UI.
- */
 export async function testConnection(cfg: {
   host: string;
   port: number;
@@ -153,8 +99,6 @@ export async function testConnection(cfg: {
       database: cfg.database,
       charset: 'utf8mb4',
       connectionLimit: 1,
-      // Fail fast so a misconfigured host doesn't hang the installer page
-      // for the default 10 seconds.
       connectTimeout: 5000,
     });
     await pool.query('SELECT 1');
@@ -166,9 +110,7 @@ export async function testConnection(cfg: {
     if (pool) {
       try {
         await pool.end();
-      } catch {
-        // ignored
-      }
+      } catch {}
     }
   }
 }

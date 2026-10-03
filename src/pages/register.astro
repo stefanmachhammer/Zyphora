@@ -1,11 +1,4 @@
 ---
-/**
- * Public registration page — creates a `subscriber` account (empty permissions)
- * and signs the user in immediately. Rendered by the active theme.
- *
- * No role dropdown: self-signups are always `subscriber`; an admin promotes
- * anyone who needs to author. Redirect is same-origin-locked like /login.
- */
 import { db, schema } from '../db/client.ts';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -54,7 +47,6 @@ if (Astro.request.method === 'POST') {
   });
 
   if (!parsed.success) {
-    // Project Zod issues into a per-field error map (first message per field wins).
     for (const issue of parsed.error.issues) {
       const key = String(issue.path[0] ?? '_');
       if (!authForm.errors[key]) authForm.errors[key] = issue.message;
@@ -79,7 +71,6 @@ if (Astro.request.method === 'POST') {
         displayName: parsed.data.displayName,
         role: SUBSCRIBER_ROLE,
       });
-      // Sign them in immediately.
       const session = await createSession(userId);
       setSessionCookie(Astro, session.id, session.expiresAt);
       return Astro.redirect(postedRedirect);

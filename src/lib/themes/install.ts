@@ -1,14 +1,3 @@
-/**
- * Theme installer — validates a zip upload and lays it out under `themes/<slug>/`.
- *
- * Threat model:
- *   - Upload is admin-only (middleware-enforced).
- *   - Templates execute server-side as Eta, so installing a theme = granting
- *     code execution. The UI says so.
- *   - Guards against zip-slip (paths resolving outside dest) and oversized/
- *     zip-bomb payloads.
- */
-
 import AdmZip from 'adm-zip';
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -39,11 +28,6 @@ const installManifestSchema = z.object({
     .optional(),
 });
 
-/**
- * Strip a single optional wrapper dir (`my-theme/...`) from entry names —
- * people zip themes both with and without one. If every entry shares the same
- * first segment, drop it; otherwise leave names alone.
- */
 function detectPrefix(entryNames: string[]): string {
   if (entryNames.length === 0) return '';
   const first = entryNames[0]!.split('/')[0];
@@ -55,7 +39,7 @@ function detectPrefix(entryNames: string[]): string {
   return `${first}/`;
 }
 
-/** Reject paths that try to escape the destination dir (zip-slip / CVE-2018-1002200). */
+// Zip-slip guard (CVE-2018-1002200).
 function isSafeRelative(rel: string): boolean {
   const normalized = normalize(rel);
   if (normalized.startsWith('..' + sep) || normalized === '..') return false;
@@ -74,11 +58,6 @@ export type UpdateResult = {
 type ParsedManifest = z.infer<typeof installManifestSchema>;
 type StrippedEntry = { raw: AdmZip.IZipEntry; rel: string };
 
-/**
- * Parse and validate an uploaded zip buffer without writing anything. Returns
- * the stripped entries and parsed `theme.json`. Throws human-readable errors
- * callers can surface verbatim in the admin UI.
- */
 function parseThemeZip(buffer: Buffer): { stripped: StrippedEntry[]; manifest: ParsedManifest } {
   if (buffer.length === 0) throw new Error('Empty upload');
   if (buffer.length > MAX_ZIP_BYTES) throw new Error(`Theme zip exceeds ${MAX_ZIP_BYTES} bytes`);
@@ -93,9 +72,7 @@ function parseThemeZip(buffer: Buffer): { stripped: StrippedEntry[]; manifest: P
   const entries = zip.getEntries();
   if (entries.length === 0) throw new Error('Zip is empty');
 
-  // Normalize to POSIX separators: some Windows zip tools emit backslashes,
-  // which Linux treats as literal filename chars (files would land at
-  // `templates\index.eta` instead of `templates/index.eta`).
+  // Some Windows zip tools emit backslashes, which Linux treats as literal filename chars.
   const entryNames = entries.map((e) => e.entryName.replace(/\\/g, '/'));
 
   const prefix = detectPrefix(entryNames);
@@ -121,15 +98,6 @@ function parseThemeZip(buffer: Buffer): { stripped: StrippedEntry[]; manifest: P
   return { stripped, manifest };
 }
 
-/**
- * Extract validated entries into a fresh `dest` (caller ensures it's absent).
- * On any failure the partial dir is removed before rethrowing, so `dest` ends
- * up either fully populated and lint-clean or absent.
- *
- * Steps: (1) sum uncompressed sizes (zip-bomb guard), (2) extract each entry
- * checking its resolved path stays inside dest, (3) lint `templates/` so
- * render-time failures surface here, not on the next page render.
- */
 function extractZipToDir(stripped: StrippedEntry[], dest: string): void {
   let total = 0;
   for (const e of stripped) {
@@ -146,8 +114,7 @@ function extractZipToDir(stripped: StrippedEntry[], dest: string): void {
       if (e.raw.isDirectory || e.rel === '') continue;
       if (!isSafeRelative(e.rel)) throw new Error(`Unsafe path in zip: ${e.rel}`);
       const outPath = join(dest, e.rel);
-      // Defense-in-depth beyond isSafeRelative: verify the resolved path stays
-      // inside `dest`, catching symlink/encoding tricks AdmZip might miss.
+      // Second zip-slip check on the resolved path, for symlink/encoding tricks AdmZip may miss.
       const resolvedOut = resolve(outPath);
       if (!resolvedOut.startsWith(resolve(dest) + sep) && resolvedOut !== resolve(dest)) {
         throw new Error(`Unsafe path in zip: ${e.rel}`);
@@ -156,26 +123,16 @@ function extractZipToDir(stripped: StrippedEntry[], dest: string): void {
       writeFileSync(outPath, e.raw.getData());
     }
 
-    // Lint the extracted `templates/`. Without this, a template with any lint.ts
-    // failure mode (issue #5) installs cleanly and explodes at first render with
-    // a compiled-JS SyntaxError; catching here keeps the failure at upload time.
     const lintIssues = lintTemplatesDir(join(dest, 'templates'));
     if (lintIssues.length > 0) {
       throw new Error(`Theme templates have errors:\n\n${formatLintIssues(lintIssues)}`);
     }
   } catch (err) {
-    // Roll back the partial extraction so the registry's next scan sees no
-    // half-populated dir.
     rmSync(dest, { recursive: true, force: true });
     throw err;
   }
 }
 
-/**
- * Install a theme from an uploaded zip. Refuses to overwrite an existing
- * theme — admins delete first or use `updateFromZip` — so the install path
- * can't cause an accidental overwrite or silent downgrade.
- */
 export async function installFromZip(buffer: Buffer): Promise<InstallResult> {
   const { stripped, manifest } = parseThemeZip(buffer);
   const slug = manifest.slug;
@@ -190,16 +147,6 @@ export async function installFromZip(buffer: Buffer): Promise<InstallResult> {
   return { slug, name: manifest.name, version: manifest.version };
 }
 
-/**
- * Update an installed theme by replacing its dir with a fresh extraction,
- * stage-then-swap: (1) extract+lint into a hidden `.staging-` dir under
- * THEMES_DIR (same volume → fast, atomic-ish rename), (2) move the live dir to
- * a `.backup-`, (3) move staging live, (4) delete the backup. If step 3 fails
- * the backup is restored.
- *
- * Refuses bundled themes (codebase-owned), slug mismatches (zip slug must equal
- * target), and missing targets (use `installFromZip`).
- */
 export async function updateFromZip(slug: string, buffer: Buffer): Promise<UpdateResult> {
   if (slug === DEFAULT_THEME_SLUG) {
     throw new Error('Cannot update the bundled default theme — it ships with the codebase');
@@ -217,13 +164,11 @@ export async function updateFromZip(slug: string, buffer: Buffer): Promise<Updat
   const prevManifest = readManifest(slug);
   const fromVersion = prevManifest?.version ?? null;
 
-  // Stage inside THEMES_DIR (same-volume rename). The dot prefix hides it from
-  // `scanThemes` if a request lands mid-update.
+  // Staged inside THEMES_DIR so the rename stays on one volume; the dot prefix
+  // hides it from `scanThemes` if a request lands mid-update.
   const staging = join(THEMES_DIR, `.staging-${slug}-${randomUUID()}`);
   extractZipToDir(stripped, staging);
 
-  // Move the current install aside first, so we can roll back if the
-  // staging→live rename fails (possible if a file is locked on Windows).
   const backup = join(THEMES_DIR, `.backup-${slug}-${randomUUID()}`);
   try {
     renameSync(dest, backup);
@@ -234,8 +179,6 @@ export async function updateFromZip(slug: string, buffer: Buffer): Promise<Updat
   try {
     renameSync(staging, dest);
   } catch (err) {
-    // Restore the previous install. If the rollback also fails the live dir is
-    // gone; surface both errors so the admin can recover manually.
     try {
       renameSync(backup, dest);
     } catch (restoreErr) {
@@ -255,10 +198,6 @@ export async function updateFromZip(slug: string, buffer: Buffer): Promise<Updat
   return { slug, name: manifest.name, fromVersion, toVersion: manifest.version };
 }
 
-/**
- * Uninstall a theme. Refuses bundled themes (codebase-owned) and the active
- * theme (switch first to avoid a blank site).
- */
 export async function uninstallTheme(slug: string): Promise<void> {
   if (slug === DEFAULT_THEME_SLUG) throw new Error('Cannot delete the bundled default theme');
   const active = await getActiveThemeSlug();
@@ -270,7 +209,6 @@ export async function uninstallTheme(slug: string): Promise<void> {
   clearRenderCache();
 }
 
-/** Switch the active theme and clear the render cache so the next request uses it. */
 export async function activateTheme(slug: string): Promise<void> {
   await setActiveTheme(slug);
   clearRenderCache();

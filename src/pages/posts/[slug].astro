@@ -1,12 +1,4 @@
 ---
-/**
- * Single-post route (published only — drafts are never publicly visible),
- * rendered via the active theme's `post.eta`. 404s render through the theme too.
- *
- * Also handles guest comment submissions: POST validates, inserts, and redirects
- * (PRG) so a refresh doesn't re-submit; on failure re-renders with sticky values
- * and per-field errors.
- */
 import { db, schema } from '../../db/client.ts';
 import { eq, and } from 'drizzle-orm';
 import { renderTheme } from '../../lib/themes/render.ts';
@@ -25,8 +17,7 @@ if (!slug) {
   });
 }
 
-// Fetch the post first — its id is needed to attach a comment, and we 404
-// identically for GET and POST.
+// Fetched before the POST branch so GET and POST 404 identically.
 const rows = await db
   .select({
     id: schema.posts.id,
@@ -56,8 +47,6 @@ if (!row) {
 
 let commentForm: CommentFormState | undefined;
 
-// Enforce the comments-disabled toggle server-side — a stale tab or scripted
-// POST shouldn't bypass it even though the template also hides the form.
 if (Astro.request.method === 'POST' && !row.commentsEnabled) {
   return new Response('Comments are disabled for this post.', {
     status: 403,
@@ -76,7 +65,6 @@ if (Astro.request.method === 'POST') {
   };
   const parsed = commentFormSchema.safeParse(raw);
 
-  // Shared by both the validation- and reCAPTCHA-failure paths.
   const stickyValues = {
     authorName: raw.authorName,
     authorEmail: raw.authorEmail,
@@ -85,8 +73,6 @@ if (Astro.request.method === 'POST') {
   };
 
   if (parsed.success) {
-    // reCAPTCHA runs only after schema validation passes, and only when the
-    // admin has configured keys (opt-in spam protection).
     const recaptcha = await getRecaptchaConfig();
     if (recaptcha.enabled) {
       const token = String(form.get('g-recaptcha-response') ?? '');
@@ -100,7 +86,6 @@ if (Astro.request.method === 'POST') {
     }
 
     if (!commentForm) {
-      // Per-post moderation override wins; otherwise the site-wide setting (default on).
       const siteRequiresModeration = (await getSetting('require_comment_moderation', '1')) === '1';
       const moderate = row.moderateComments ?? siteRequiresModeration;
       const { status } = await createComment(parsed.data, {
@@ -108,11 +93,9 @@ if (Astro.request.method === 'POST') {
         userAgent: Astro.request.headers.get('user-agent') ?? undefined,
         initialStatus: moderate ? 'pending' : 'approved',
       });
-      // PRG; status drives the banner ("up" vs "awaiting moderation").
       return Astro.redirect(`/posts/${row.slug}?comment=${status}#comments`);
     }
   } else {
-    // Project Zod issues into a field-keyed error map (first message per field wins).
     const errors: Record<string, string> = {};
     for (const issue of parsed.error.issues) {
       const key = String(issue.path[0] ?? '_');
@@ -122,13 +105,10 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-// Attribute this view to the post for analytics (read by the middleware after
-// render). Only reached on the render path — 404s and the POST redirect return
-// earlier, and the middleware also ignores non-200 responses.
+// Read by the middleware after render to attribute this page view.
 Astro.locals.trackedPostId = row.id;
 Astro.locals.trackedPath = `/posts/${row.slug}`;
 
-// Disabling comments hides both the form and previously approved comments.
 const comments = row.commentsEnabled ? await getApprovedComments(row.id) : [];
 const commentSubmittedParam = Astro.url.searchParams.get('comment');
 const commentSubmitted: 'pending' | 'approved' | null =
@@ -138,7 +118,6 @@ const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const formatComment = (s: string) => escapeHtml(s).replace(/\r?\n/g, '<br>');
 
-// Keep the internal `id` out of the template payload.
 const { id: _postId, ...publicPost } = row;
 
 return await renderTheme({

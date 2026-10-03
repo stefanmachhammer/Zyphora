@@ -1,15 +1,3 @@
-/**
- * Local-filesystem media storage.
- *
- * Files land in `public/uploads/` (gitignored) with random UUID names so the
- * original filename can't influence the URL or be guessed. To swap to S3/R2
- * later, replace the three exported functions below (`saveUpload`,
- * `deleteUpload`, `publicUrl`) — every call site goes through them, so the
- * rest of the codebase won't need to change.
- *
- * MIME allowlist + 10 MB cap are intentionally simple. If you grow this list,
- * keep an eye on SVG (it can carry script — DOMPurify is not run on uploads).
- */
 import { mkdirSync } from 'node:fs';
 import { writeFile, unlink } from 'node:fs/promises';
 import { join, extname } from 'node:path';
@@ -19,7 +7,7 @@ export const UPLOADS_DIR = join(process.cwd(), 'public', 'uploads');
 
 const ALLOWED_MIME = new Set([
   'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
-  // ICO has two MIME types in the wild: browser-sent vs. IANA-registered.
+  // Browsers send image/x-icon; IANA registers image/vnd.microsoft.icon.
   'image/x-icon', 'image/vnd.microsoft.icon',
   'application/pdf',
   'video/mp4', 'video/webm',
@@ -35,13 +23,6 @@ export type SavedFile = {
   sizeBytes: number;
 };
 
-/**
- * Persist an uploaded `File`, enforcing size + MIME limits. Returns the
- * generated filename + metadata; the caller inserts the matching `media` row.
- *
- * The on-disk name is a fresh UUID plus a scrubbed extension — the user's
- * original filename never reaches the path or public URL.
- */
 export async function saveUpload(file: File): Promise<SavedFile> {
   if (file.size === 0) throw new Error('Empty file');
   if (file.size > MAX_BYTES) throw new Error('File exceeds 10 MB limit');
@@ -56,16 +37,12 @@ export async function saveUpload(file: File): Promise<SavedFile> {
   return { filename, mimeType: file.type, sizeBytes: file.size };
 }
 
-/** Best-effort delete of a stored file. Missing files are silently ignored. */
 export async function deleteUpload(filename: string) {
   try {
     await unlink(join(UPLOADS_DIR, filename));
-  } catch {
-    // already gone — ignore
-  }
+  } catch {}
 }
 
-/** Public URL for a stored file. Astro serves `public/` at the site root. */
 export function publicUrl(filename: string): string {
   return `/uploads/${filename}`;
 }

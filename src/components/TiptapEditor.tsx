@@ -1,19 +1,11 @@
-/**
- * Rich-text editor — the only React island. Mounted `client:only="react"`
- * (no SSR); the current HTML is mirrored into a hidden `<input name={name}>`
- * so the surrounding form POST carries it as a normal field.
- *
- * Output is sanitized server-side in `src/lib/posts.ts` before storage. If you
- * extend the toolbar, add the new tag to DOMPurify's allowlist in
- * `src/lib/sanitize.ts` — otherwise it is silently stripped on save.
- */
+// Adding a toolbar feature? Also add its tag to the DOMPurify allowlist in
+// src/lib/sanitize.ts, or it is silently stripped on save.
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { useState } from 'react';
 
 type Props = {
   initialHtml?: string;
-  /** Form field name for the hidden input that carries the HTML on submit. */
   name: string;
 };
 
@@ -35,8 +27,6 @@ export default function TiptapEditor({ initialHtml = '', name }: Props) {
     </button>
   );
 
-  // Link button uses a native prompt — empty string means "remove the link",
-  // null (cancel) leaves the existing mark untouched.
   const setLink = () => {
     const prev = editor.getAttributes('link').href as string | undefined;
     const url = window.prompt('URL', prev ?? 'https://');

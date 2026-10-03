@@ -1,14 +1,8 @@
 ---
-/**
- * Search results — case-insensitive LIKE across post title, excerpt, and content
- * (published only; drafts are never searched). LIKE over FULLTEXT is deliberate:
- * fine at indie-CMS scale, and swappable later without changing the theme contract.
- */
 import { db, schema } from '../db/client.ts';
 import { and, eq, or, like, desc } from 'drizzle-orm';
 import { renderTheme } from '../lib/themes/render.ts';
 
-// Cap length so a giant string can't blow up the LIKE pattern. Empty is valid.
 const rawQuery = Astro.url.searchParams.get('q') ?? '';
 const query = rawQuery.trim().slice(0, 100);
 
@@ -21,12 +15,9 @@ let posts: Array<{
 }> = [];
 
 if (query.length > 0) {
-  // Strip LIKE wildcards so a search for "50%" can't match every post (simpler
-  // than plumbing an ESCAPE clause through drizzle's `like` helper). LIKE is
-  // case-insensitive under the default utf8mb4 `_ci` collation in MySQL 8.
+  // Strip LIKE wildcards so a search for "50%" can't match every post.
   const sanitized = query.replace(/[%_]/g, '');
   if (sanitized.length === 0) {
-    // Query was entirely wildcards; treat as empty rather than match-all.
     return await renderTheme({
       template: 'search',
       pathname: Astro.url.pathname,

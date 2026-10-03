@@ -1,12 +1,4 @@
-/**
- * Runtime file server for `/uploads/<filename>`.
- *
- * With `output: 'server'`, Astro's static layer only serves files present under
- * `public/` at build time — media uploaded after deploy would 404. This route
- * streams it from `UPLOADS_DIR` at request time.
- *
- * Path-traversal safe: rejects `..`/separators and resolve-checks the final path.
- */
+// Astro only serves `public/` files present at build time; post-deploy uploads would 404 without this.
 import type { APIRoute } from 'astro';
 import { existsSync, statSync, readFileSync } from 'node:fs';
 import { join, resolve, sep, extname } from 'node:path';
@@ -45,18 +37,14 @@ export const GET: APIRoute = ({ params }) => {
   const mime = MIME_BY_EXT[ext] ?? 'application/octet-stream';
   const body = readFileSync(resolved);
 
-  // Uploads are user-supplied and same-origin, so response headers matter for XSS.
   const headers: Record<string, string> = {
     'content-type': mime,
-    // Filenames are random UUIDs, so the content at a URL never changes.
     'cache-control': 'public, max-age=31536000, immutable',
-    // Prevent MIME-sniffing a non-HTML upload into an executable document.
+    // Stops a non-HTML upload being sniffed into an executable document.
     'x-content-type-options': 'nosniff',
   };
-  // SVG opened as a top-level navigation runs inline <script> same-origin. A bare
-  // `sandbox` CSP disables scripts/same-origin in that document context (killing the
-  // XSS) while leaving <img>/<link rel=icon> embedding untouched. SVG-only so it
-  // doesn't affect the inline PDF viewer or media playback.
+  // SVG navigated to directly runs inline <script> same-origin; `sandbox` kills
+  // that while leaving <img> embedding untouched.
   if (ext === '.svg') {
     headers['content-security-policy'] = 'sandbox';
   }

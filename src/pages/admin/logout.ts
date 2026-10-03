@@ -1,7 +1,3 @@
-/**
- * Logout endpoint — drops the session row, clears the cookie, redirects to login.
- * GET = POST so a plain link/back-button navigation still logs out.
- */
 import type { APIRoute } from 'astro';
 import { deleteSession, clearSessionCookie } from '../../lib/auth.ts';
 

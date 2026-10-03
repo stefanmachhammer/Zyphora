@@ -1,12 +1,4 @@
 ---
-/**
- * Installer step 1 — database credentials.
- *
- * Operator enters host/port/user/password/database; we verify with a one-shot
- * pool, then write `.env`, patch `process.env`, and rebuild the pool. We do NOT
- * write `.env` before the connection test passes — a typo would otherwise lock
- * the operator out and require SSH to repair.
- */
 import '../../styles/admin.css';
 import { testConnection, reloadDbConfig } from '../../db/client.ts';
 import { writeEnvVars } from '../../lib/env-file.ts';
@@ -14,8 +6,6 @@ import { resetInstallStateCache, getInstallState } from '../../lib/install.ts';
 
 const theme = Astro.cookies.get('zyphora_theme')?.value === 'dark' ? 'dark' : 'light';
 
-// Prefill from existing env so a partial install doesn't force a retype.
-// Password is never echoed back.
 let host = process.env.DB_HOST ?? 'localhost';
 let port = process.env.DB_PORT ?? '3306';
 let user = process.env.DB_USER ?? '';
@@ -23,8 +13,7 @@ let database = process.env.DB_NAME ?? '';
 let error: string | null = null;
 
 if (Astro.request.method === 'POST') {
-  // Defense-in-depth: never let a POST rewrite `.env` credentials on an
-  // already-installed CMS, even if a request slips past the middleware 404 guard.
+  // Never rewrite `.env` on an installed CMS, even if a request slips past the middleware 404 guard.
   if ((await getInstallState()) === 'installed') {
     return Astro.redirect('/admin');
   }
@@ -42,12 +31,11 @@ if (Astro.request.method === 'POST') {
   } else if (!Number.isFinite(portNum) || portNum < 1 || portNum > 65535) {
     error = 'Port must be a number between 1 and 65535.';
   } else {
-    // Test before persisting; mysql2's error messages are UI-useful as-is.
+    // Do NOT write `.env` before the connection test passes — a typo would lock the operator out.
     const testError = await testConnection({ host, port: portNum, user, password, database });
     if (testError) {
       error = `Could not connect: ${testError}`;
     } else {
-      // Persist only these keys; other existing .env entries are preserved.
       writeEnvVars({
         DB_HOST: host,
         DB_PORT: String(portNum),
@@ -68,7 +56,6 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-// Already fully installed — no reason to be on step 1.
 if (Astro.request.method === 'GET') {
   const state = await getInstallState();
   if (state === 'installed') return Astro.redirect('/admin');

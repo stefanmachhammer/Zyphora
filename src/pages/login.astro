@@ -1,11 +1,4 @@
 ---
-/**
- * Public login page — rendered by the active theme (not the admin shell).
- *
- * A single generic error covers both "no such user" and "wrong password" so
- * attackers can't probe for valid emails. The post-login redirect is locked to
- * same-origin paths (see safeRedirect) to prevent an open redirect.
- */
 import { db, schema } from '../db/client.ts';
 import { eq } from 'drizzle-orm';
 import { verifyPassword, createSession, setSessionCookie } from '../lib/auth.ts';
@@ -31,7 +24,6 @@ if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const email = String(form.get('email') ?? '').trim().toLowerCase();
   const password = String(form.get('password') ?? '');
-  // Themes round-trip the post-login destination through a hidden input.
   const postedRedirect = safeRedirect(String(form.get('redirect') ?? '') || redirectTo);
   authForm.values.email = email;
 
@@ -41,7 +33,7 @@ if (Astro.request.method === 'POST') {
     const rows = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1);
     const user = rows[0];
     if (!user || !(await verifyPassword(user.passwordHash, password))) {
-      // Generic message for both branches — see top-of-file comment.
+      // One message for unknown email and wrong password so emails can't be probed.
       authForm.error = 'Invalid email or password.';
     } else {
       const session = await createSession(user.id);

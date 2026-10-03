@@ -1,20 +1,6 @@
-/**
- * HTML sanitizer for every piece of user-authored markup before storage.
- *
- * The allowlist is deliberately narrow — just what the TipTap toolbar produces.
- * Each added tag widens the security boundary, so prefer matching an existing
- * tag over opening an exotic one.
- *
- * IMPORTANT: every rich-HTML field must pass through this before insert/update.
- * The public site renders post HTML raw (`set:html` / Eta `<%~ %>`), which is
- * safe ONLY because of this. Bypassing it is stored XSS.
- *
- * Excluded on purpose: `<script>`, `<iframe>`, inline event handlers (DOMPurify
- * defaults), and `data-*` (unused, common CSS/script smuggling vector).
- */
+// Public templates render the output raw; every rich-HTML field must pass through here before storage.
 import DOMPurify from 'isomorphic-dompurify';
 
-/** Run untrusted HTML through DOMPurify with the project allowlist. */
 export function sanitizeHtml(html: string): string {
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [

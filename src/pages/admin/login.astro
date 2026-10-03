@@ -1,8 +1,4 @@
 ---
-/**
- * Login page — the one /admin/* route middleware lets through unauthenticated.
- * The post-login redirect is locked to /admin paths to avoid an open redirect.
- */
 import '../../styles/admin.css';
 import { db, schema } from '../../db/client.ts';
 import { eq } from 'drizzle-orm';
@@ -18,7 +14,6 @@ const theme = Astro.cookies.get('zyphora_theme')?.value === 'dark' ? 'dark' : 'l
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
-  // Email normalized to lowercase to match storage.
   const email = String(form.get('email') ?? '').trim().toLowerCase();
   const password = String(form.get('password') ?? '');
 

@@ -1,45 +1,19 @@
-/**
- * Eta template linter.
- *
- * Eta's tokenizer scans for delimiters (`<%`, `%>`) as raw substrings — it
- * doesn't understand JS strings, regexes, or block comments. So a few edits
- * silently break a template with only a compiled-JS SyntaxError to show for it.
- * The three caught failure modes:
- *   1. `<%# … %>` — Eta v3 dropped the hash-comment delimiter; `#` leaks into
- *      compiled JS and throws.
- *   2. A tag body containing another `<%` opener — the parser desyncs from there.
- *   3. An open `<%` with no matching `%>`.
- *
- * Emits structured line/column issues so the renderer and installer can report
- * a real error before Eta crashes. Deliberately conservative — only the modes
- * we've been bitten by, to avoid false positives. See issue #5.
- */
+// Eta's tokenizer matches `<%`/`%>` as raw substrings — it does not understand JS
+// strings, regexes or block comments inside a tag — and Eta v3 dropped `<%#`.
+// This walk mirrors that: tag bodies are deliberately not parsed as JS.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-/** Stable identifiers so callers can branch on rule type rather than message text. */
 export type EtaLintRule = 'unsupported-comment' | 'nested-tag-open' | 'unclosed-tag';
 
-/**
- * A single linter problem with source location. `file` is attached by
- * `lintTemplatesDir`; `lintEtaSource` doesn't know the filename.
- */
 export type EtaLintIssue = {
   file?: string;
-  /** 1-based line number, matching what editors show in the gutter. */
   line: number;
-  /** 1-based column number. */
   column: number;
   rule: EtaLintRule;
   message: string;
 };
 
-/**
- * Scan one template's source for issues via a two-state (outside/inside-tag)
- * character walk. It intentionally does NOT parse the JS inside a tag —
- * mirroring Eta's tokenizer, a delimiter-looking substring counts as a
- * delimiter even inside a string literal.
- */
 export function lintEtaSource(source: string): EtaLintIssue[] {
   const issues: EtaLintIssue[] = [];
 
@@ -47,7 +21,6 @@ export function lintEtaSource(source: string): EtaLintIssue[] {
   let line = 1;
   let column = 1;
   let inTag = false;
-  // Most recent `<%` position, so an EOF unclosed-tag report points at the open.
   let tagOpenLine = 1;
   let tagOpenColumn = 1;
 
@@ -65,8 +38,6 @@ export function lintEtaSource(source: string): EtaLintIssue[] {
 
   while (pos < source.length) {
     if (!inTag) {
-      // Rule 1: `<%#` — a v2-era comment delimiter Eta v3+ rejects. Skip past
-      // so we don't also fire rule 2.
       if (source.startsWith('<%#', pos)) {
         issues.push({
           line,
@@ -76,7 +47,6 @@ export function lintEtaSource(source: string): EtaLintIssue[] {
             'Eta v3+ does not support `<%# … %>` comment delimiters. Use `<% /* … */ %>` instead — and make sure the comment body does not contain `<%`, `<%=`, `<%~`, or `<%-` substrings.',
         });
         advance(3);
-        // Skip to the matching `%>` so the rest of the file still lints sensibly.
         while (pos < source.length && !source.startsWith('%>', pos)) {
           advance(1);
         }
@@ -92,7 +62,6 @@ export function lintEtaSource(source: string): EtaLintIssue[] {
       }
       advance(1);
     } else {
-      // Rule 2: another `<%` opener inside the current tag body.
       if (source.startsWith('<%', pos)) {
         issues.push({
           line,
@@ -101,11 +70,9 @@ export function lintEtaSource(source: string): EtaLintIssue[] {
           message:
             'Tag body contains a `<%` substring (looks like another tag opener). Eta\'s tokenizer scans for delimiters in raw text — string literals, regexes, and `/* … */` comments do not protect against this. Rewrite the comment or expression to avoid the substring.',
         });
-        // Keep scanning past it so one pass surfaces every problem.
         advance(2);
         continue;
       }
-      // Eta closes tags with `%>`, `-%>`, or `_%>` (whitespace-slurping variants).
       if (
         source.startsWith('-%>', pos) ||
         source.startsWith('_%>', pos)
@@ -123,7 +90,6 @@ export function lintEtaSource(source: string): EtaLintIssue[] {
     }
   }
 
-  // Rule 3: EOF with a tag still open. Point at the open, not EOF.
   if (inTag) {
     issues.push({
       line: tagOpenLine,
@@ -136,7 +102,6 @@ export function lintEtaSource(source: string): EtaLintIssue[] {
   return issues;
 }
 
-/** Recursively collect every `.eta` file path under `dir`. */
 function walkEtaFiles(dir: string): string[] {
   if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) return [];
   const out: string[] = [];
@@ -151,10 +116,6 @@ function walkEtaFiles(dir: string): string[] {
   return out;
 }
 
-/**
- * Lint every `.eta` file in `templatesDir`. Issues carry `file` relative to
- * `templatesDir`, keeping messages short regardless of the absolute path depth.
- */
 export function lintTemplatesDir(templatesDir: string): EtaLintIssue[] {
   const issues: EtaLintIssue[] = [];
   for (const abs of walkEtaFiles(templatesDir)) {
@@ -166,12 +127,6 @@ export function lintTemplatesDir(templatesDir: string): EtaLintIssue[] {
   return issues;
 }
 
-/**
- * Format issues as a multi-line, editor-friendly string for errors/stderr:
- *
- *   templates/post.eta:12:23  nested-tag-open
- *     Tag body contains a `<%` substring…
- */
 export function formatLintIssues(issues: EtaLintIssue[]): string {
   return issues
     .map((i) => {
