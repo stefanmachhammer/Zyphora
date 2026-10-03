@@ -18,11 +18,22 @@
       %>
         <h2 id="posts" class="section-heading">Featured</h2>
         <ul class="featured-grid">
-          <% for (const f of featured) { %>
+          <%
+            // Deterministic two-hue gradient derived from the slug so every
+            // post gets a stable, distinct cover without any external request.
+            // djb2-ish hash → hue in [0, 360); a second hue 60° around the
+            // wheel keeps the gradient lively without clashing.
+            const slugHue = (slug) => {
+              let h = 0;
+              for (let i = 0; i < slug.length; i++) h = (h * 33 + slug.charCodeAt(i)) | 0;
+              return ((h % 360) + 360) % 360;
+            };
+          %>
+          <% for (const f of featured) { const h1 = slugHue(f.slug); const h2 = (h1 + 60) % 360; %>
             <li class="featured-card">
               <a class="featured-card-link" href="<%= url.post(f.slug) %>">
                 <div class="featured-card-media">
-                  <img class="featured-card-image" src="https://picsum.photos/seed/<%= f.slug %>/640/400" alt="" loading="lazy" width="640" height="400" />
+                  <div class="featured-card-cover" aria-hidden="true" style="background-image: linear-gradient(135deg, hsl(<%= h1 %>, 55%, 45%), hsl(<%= h2 %>, 60%, 30%));"></div>
                 </div>
                 <div class="featured-card-overlay">
                   <h3 class="featured-card-title"><%= f.title %></h3>
