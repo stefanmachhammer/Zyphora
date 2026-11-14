@@ -17,7 +17,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "@astrojs/node": "^11.1.6",
+    "@astrojs/node": "^11.1.12",
     "@astrojs/react": "^7.0.0",
     "@node-rs/argon2": "^2.2.1",
     "@tiptap/pm": "^3.31.3",
